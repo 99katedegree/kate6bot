@@ -238,8 +238,8 @@ const bot = createBot({
 
 const log = createLogger(bot);
 
-// 木曜 20:00 JST(=11:00 UTC)
-Deno.cron("段位確認リマインド", "0 11 * * 4", async () => {
+// [tier-reminder] 木曜 20:00 JST(=11:00 UTC)
+Deno.cron("tier-reminder", "0 11 * * 4", async () => {
   await log("段位確認リマインドのcronを開始します");
   const weekOf = upcomingMonday(new Date());
   await log(`対象週を計算しました: ${weekOf}`);
@@ -269,7 +269,7 @@ Deno.cron("段位確認リマインド", "0 11 * * 4", async () => {
 });
 
 // 月曜 0:00 JST(=前日15:00 UTC)
-Deno.cron("週次ランダムピック", "0 15 * * 0", async () => {
+Deno.cron("weekly-pick", "0 15 * * 0", async () => {
   await log("週次ランダムピックのcronを開始します");
   const weekOf = jstDateString(new Date());
   await log(`対象週を計算しました: ${weekOf}`);
@@ -331,7 +331,7 @@ Deno.cron("週次ランダムピック", "0 15 * * 0", async () => {
 });
 
 // 月曜 21:00 JST(=12:00 UTC): 開始目安のリマインド
-Deno.cron("pickup開始リマインド", "0 12 * * 1", async () => {
+Deno.cron("pickup-start-reminder", "0 12 * * 1", async () => {
   const holders = await getCurrentPickupHolders(db);
   const pickupChannelId = await getPickupChannelId(db);
   if (holders.length === 0 || !pickupChannelId) {
@@ -347,7 +347,7 @@ Deno.cron("pickup開始リマインド", "0 12 * * 1", async () => {
 });
 
 // 月曜 22:15 JST(=13:15 UTC): 終了15分前の警告
-Deno.cron("pickup終了警告", "15 13 * * 1", async () => {
+Deno.cron("pickup-end-warning", "15 13 * * 1", async () => {
   const holders = await getCurrentPickupHolders(db);
   const pickupChannelId = await getPickupChannelId(db);
   if (holders.length === 0 || !pickupChannelId) {
@@ -363,7 +363,7 @@ Deno.cron("pickup終了警告", "15 13 * * 1", async () => {
 });
 
 // 月曜 22:30 JST(=13:30 UTC): 何があってもクリーンアップ
-Deno.cron("pickupクリーンアップ", "30 13 * * 1", async () => {
+Deno.cron("pickup-cleanup", "30 13 * * 1", async () => {
   await log("pickupクリーンアップのcronを開始します");
 
   const holders = await getCurrentPickupHolders(db);
@@ -393,7 +393,7 @@ Deno.cron("pickupクリーンアップ", "30 13 * * 1", async () => {
 });
 
 // 毎日 3:00 JST(=前日18:00 UTC): 自己紹介チャンネル名をDiscordのユーザー名に同期
-Deno.cron("自己紹介チャンネル名の同期", "0 18 * * *", async () => {
+Deno.cron("bio-channel-name-sync", "0 18 * * *", async () => {
   await log("自己紹介チャンネル名の同期cronを開始します");
   const { updated, failed } = await syncBioChannelNames(bot, db);
   await log(
