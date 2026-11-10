@@ -40,4 +40,4 @@ jobs:
             "TURSO_URL=$TURSO_URL" \
             "TURSO_TOKEN=$TURSO_TOKEN" \
             | flyctl secrets import --stage
-      - run: flyctl deploy --remote-only
+      - run: flyctl deploy --remote-only --ha=false

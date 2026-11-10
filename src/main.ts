@@ -269,7 +269,7 @@ Deno.cron("tier-reminder", "0 11 * * 4", async () => {
 });
 
 // 月曜 0:00 JST(=前日15:00 UTC)
-Deno.cron("weekly-pick", "0 15 * * 0", async () => {
+Deno.cron("weekly-pick", "0 15 * * SUN", async () => {
   await log("週次ランダムピックのcronを開始します");
   const weekOf = jstDateString(new Date());
   await log(`対象週を計算しました: ${weekOf}`);
