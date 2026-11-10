@@ -17,7 +17,11 @@ import {
   grantPickupRole,
   revokePickupRole,
 } from "./pickup/role.ts";
-import { getPickupTextChannelId, recreatePickupChannels } from "./pickup/channel.ts";
+import {
+  ensurePickupChannels,
+  getPickupTextChannelId,
+  recreatePickupChannels,
+} from "./pickup/channel.ts";
 import { pickGroup } from "./pickup/pick.ts";
 import { buildPool } from "./pickup/pool.ts";
 import { isSkipped, setSkip } from "./pickup/skip.ts";
@@ -50,9 +54,11 @@ const TIER_SELECT_CUSTOM_ID = "tier_select";
 const OPEN_TIER_SELECT_BUTTON = "open_tier_select";
 const SKIP_WEEK_PREFIX = "skip_week:";
 
-function tierSelectMessage(): InteractionCallbackData {
+function tierSelectMessage(
+  content = "あなたにしか見えない形で段位を設定できます。下から選んでください。",
+): InteractionCallbackData {
   return {
-    content: "あなたにしか見えない形で段位を設定できます。下から選んでください。",
+    content,
     components: [
       {
         type: MessageComponentTypes.ActionRow,
@@ -77,6 +83,7 @@ const bot = createBot({
     message: { id: true, content: true, channelId: true },
     channel: { id: true, parentId: true },
     member: { roles: true, user: true, nick: true },
+    guild: { id: true, name: true },
     interaction: {
       id: true,
       token: true,
@@ -90,6 +97,16 @@ const bot = createBot({
     ready: async ({ shardId, user }) => {
       await log(`Shard ${shardId} ready as ${user.username}`);
       await applyManagedPermissions(bot, log);
+      try {
+        const created = await ensurePickupChannels(bot, db);
+        await log(
+          created
+            ? "pickup用のテキストチャンネルとVCが揃っていなかったため作成しました"
+            : "pickup用のテキストチャンネルとVCは揃っています",
+        );
+      } catch (error) {
+        await log(`pickup用チャンネルの確認に失敗しました: ${error}`);
+      }
       await runBioReconcile();
     },
     interactionCreate: async (interaction) => {
@@ -205,14 +222,50 @@ const bot = createBot({
 
       try {
         const dmChannel = await bot.helpers.getDmChannel(user.id);
+        // DMにはどのサーバーからの連絡か分からないので、サーバー名を明記する
+        const guildName = await bot.helpers.getGuild(guildId).then((g) => g.name).catch(() => null);
         await notify(
           bot,
           dmChannel.id,
-          `ここはあなた専用の自己紹介チャンネルです: <#${channelId}>\n自由に自己紹介を投稿してください。(新しく投稿すると、前回の内容は自動で削除され最新の投稿だけが使われます。pickでピックされた人にだけ公開されます)`,
+          [
+            `${guildName ? `「${guildName}」` : "サーバー"}へようこそ！`,
+            "このbotが、平日(月〜金)の毎日、その日に一緒に遊ぶメンバーを自動で選びます。",
+            `ここはあなた専用の自己紹介チャンネルです: <#${channelId}>`,
+            "自由に自己紹介を投稿してください。(新しく投稿すると、前回の内容は自動で削除され、最新の投稿だけが使われます。選ばれた日に、同じグループの人にだけ公開されます)",
+          ].join("\n"),
         );
         await log(`案内をDMで送信しました(user=${userId})`);
+
+        // 段位は選択肢から選ぶだけ。選択後は /段位 と同じ処理でロールが付与される
+        await notify(
+          bot,
+          dmChannel.id,
+          tierSelectMessage(
+            "最後に、あなたの段位を下から選んでください。(あとから /段位 でも変更できます)",
+          ),
+        );
+        await log(`段位選択メニューをDMで送信しました(user=${userId})`);
       } catch (error) {
         await log(`DM送信に失敗しました(user=${userId}): ${error}`);
+        // DMを閉じている人にも届くよう、アナウンスチャンネルから案内する
+        await notify(bot, announceChannelId, {
+          content:
+            `<@${userId}> ようこそ！DMを送れなかったので、こちらからご案内します。\nあなた専用の自己紹介チャンネルは <#${channelId}> です。段位は下のボタンから設定してください。`,
+          components: [
+            {
+              type: MessageComponentTypes.ActionRow,
+              components: [
+                {
+                  type: MessageComponentTypes.Button,
+                  style: ButtonStyles.Primary,
+                  label: "段位を設定する",
+                  customId: OPEN_TIER_SELECT_BUTTON,
+                },
+              ],
+            },
+          ],
+        });
+        await log(`アナウンスチャンネルから案内しました(user=${userId})`);
       }
     },
     guildMemberUpdate: async (member, user) => {

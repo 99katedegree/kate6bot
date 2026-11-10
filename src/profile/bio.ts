@@ -11,6 +11,14 @@ export function displayName(member: MemberNames): string {
   return member.nick || member.user?.globalName || member.user?.username || "unknown";
 }
 
+/**
+ * 自己紹介チャンネルの名前。「【自己紹介】○○」のプレフィックス形式にする。
+ * ハイフンは使わない。[ ] や : はDiscordのチャンネル名では除去・変換されるため、全角の【 】を使う。
+ */
+export function bioChannelName(name: string): string {
+  return `【自己紹介】${name}`;
+}
+
 export interface ChannelManager {
   helpers: {
     createChannel: (
@@ -96,7 +104,7 @@ export async function ensureBioChannel(
   const channel = await bot.helpers.createChannel(
     guildId,
     {
-      name: `自己紹介-${name}`,
+      name: bioChannelName(name),
       type: ChannelTypes.GuildText,
       parentId: profileCategoryId,
       permissionOverwrites: [
@@ -164,7 +172,7 @@ export async function syncBioChannelNames(
       const member = await bot.helpers.getMember(guildId, BigInt(userId));
       await bot.helpers.editChannel(
         BigInt(channelId),
-        { name: `自己紹介-${displayName(member)}` },
+        { name: bioChannelName(displayName(member)) },
         "チャンネル名の日次同期",
       );
       updated.push(userId);

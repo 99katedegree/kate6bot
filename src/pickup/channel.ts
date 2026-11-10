@@ -9,13 +9,15 @@ interface ChannelManager {
       reason?: string,
     ) => Promise<{ id: bigint }>;
     deleteChannel: (channelId: bigint, reason?: string) => Promise<void>;
+    getChannel: (channelId: bigint) => Promise<unknown>;
   };
 }
 
 const guildId = BigInt(Deno.env.get("GUILD_ID")!);
 const pickupCategoryId = BigInt(Deno.env.get("PICKUP_CATEGORY_ID")!);
-const PICKUP_VC_NAME = "pickup";
-const PICKUP_TEXT_NAME = "pickup-chat";
+// Discordのデフォルトと同じ、普通のチャンネル名にする
+const PICKUP_VC_NAME = "ボイスチャンネル";
+const PICKUP_TEXT_NAME = "テキストチャンネル";
 
 export interface PickupChannels {
   voiceId: bigint;
@@ -86,4 +88,24 @@ export async function recreatePickupChannels(
   const channels = { voiceId: voice.id, textId: text.id };
   await setPickupChannels(db, channels);
   return channels;
+}
+
+/**
+ * 起動時に呼ぶ。pickup用のテキストチャンネルとVCが揃っていなければ作り直す。
+ * (毎日のピックまで待たずに、カテゴリーの中身が常に揃った状態にしておくため)
+ * 既に両方あれば何もしない。作り直した場合は true を返す。
+ */
+export async function ensurePickupChannels(bot: ChannelManager, db: Database): Promise<boolean> {
+  const ids = await getExistingChannelIds(db);
+  const textId = await getPickupTextChannelId(db);
+  if (ids.length === 2 && textId) {
+    try {
+      for (const id of ids) await bot.helpers.getChannel(BigInt(id));
+      return false;
+    } catch {
+      // どちらかが消えている → 作り直す
+    }
+  }
+  await recreatePickupChannels(bot, db);
+  return true;
 }
