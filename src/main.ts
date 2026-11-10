@@ -55,7 +55,7 @@ const OPEN_TIER_SELECT_BUTTON = "open_tier_select";
 const SKIP_WEEK_PREFIX = "skip_week:";
 
 function tierSelectMessage(
-  content = "あなたにしか見えない形で段位を設定できます。下から選んでください。",
+  content = "今の段位を選んでみて！他の人には見えないので、気軽にどうぞ",
 ): InteractionCallbackData {
   return {
     content,
@@ -177,7 +177,7 @@ const bot = createBot({
           );
           await respondPrivately(
             interaction,
-            "段位の更新に失敗しました。管理者に連絡してください。",
+            "ごめんなさい、段位の更新に失敗しました。管理者に連絡してください。",
           );
           return;
         }
@@ -190,7 +190,7 @@ const bot = createBot({
           : "";
         await respondPrivately(
           interaction,
-          `段位を「${tierLabel(selected)}」に設定しました。${note}`,
+          `段位を「${tierLabel(selected)}」に設定しました！${note}`,
         );
         return;
       }
@@ -204,7 +204,10 @@ const bot = createBot({
         await log(`「今週は参加しない」ボタンが押されました(user=${userId}, week=${weekOf})`);
         await setSkip(db, userId, weekOf);
         await log(`weekly_skipに記録しました(user=${userId}, week=${weekOf})`);
-        await respondPrivately(interaction, `${weekOf}の週は参加しない設定にしました。`);
+        await respondPrivately(
+          interaction,
+          `${weekOf}の週は、お休みにしておきました。また来週お待ちしています！`,
+        );
         return;
       }
     },
@@ -229,9 +232,10 @@ const bot = createBot({
           dmChannel.id,
           [
             `${guildName ? `「${guildName}」` : "サーバー"}へようこそ！`,
-            "このbotが、平日(月〜金)の毎日、その日に一緒に遊ぶメンバーを自動で選びます。",
-            `ここはあなた専用の自己紹介チャンネルです: <#${channelId}>`,
-            "自由に自己紹介を投稿してください。(新しく投稿すると、前回の内容は自動で削除され、最新の投稿だけが使われます。選ばれた日に、同じグループの人にだけ公開されます)",
+            "平日(月〜金)は毎日、私がその日に一緒に遊ぶメンバーを選びます！",
+            "また、あなた専用の自己紹介チャンネルを作ったので、ぜひ自己紹介を投稿してください！",
+            `https://discord.com/channels/${guildId}/${channelId}`,
+            "投稿した自己紹介は、一緒に遊ぶときに自動で共有されます。何度でも投稿し直せて、使われるのは最新の1件だけです。",
           ].join("\n"),
         );
         await log(`案内をDMで送信しました(user=${userId})`);
@@ -241,7 +245,7 @@ const bot = createBot({
           bot,
           dmChannel.id,
           tierSelectMessage(
-            "最後に、あなたの段位を下から選んでください。(あとから /段位 でも変更できます)",
+            "最後に、あなたの段位を下から選んでください。あとから変えたいときは、/段位 でいつでも変更できます。",
           ),
         );
         await log(`段位選択メニューをDMで送信しました(user=${userId})`);
@@ -250,7 +254,7 @@ const bot = createBot({
         // DMを閉じている人にも届くよう、アナウンスチャンネルから案内する
         await notify(bot, announceChannelId, {
           content:
-            `<@${userId}> ようこそ！DMを送れなかったので、こちらからご案内します。\nあなた専用の自己紹介チャンネルは <#${channelId}> です。段位は下のボタンから設定してください。`,
+            `<@${userId}> ようこそ！DMを送れなかったので、こちらで案内しますね。\nあなた専用の自己紹介チャンネルは <#${channelId}> です。段位は下のボタンから選べます。`,
           components: [
             {
               type: MessageComponentTypes.ActionRow,
@@ -354,7 +358,7 @@ Deno.cron("tier-reminder", "0 11 * * 4", async () => {
   const weekOf = upcomingMonday(new Date());
   await log(`対象週を計算しました: ${weekOf}`);
   await notify(bot, announceChannelId, {
-    content: "段位は変わりましたか？ボタンを押すと、あなたにしか見えない形で確認・設定できます。",
+    content: "段位は変わりましたか？下のボタンから、自分だけに見える形で確認・変更できます。",
     components: [
       {
         type: MessageComponentTypes.ActionRow,
@@ -419,7 +423,11 @@ Deno.cron("daily-pick", "0 15 * * SUN-THU", async () => {
 
   if (!result) {
     await log(`ピック不成立(対象日: ${today}, プール: ${pool.length}人)`);
-    await notify(bot, announceChannelId, `今日(${today})は候補が足りず不成立でした。`);
+    await notify(
+      bot,
+      announceChannelId,
+      `今日(${today})は人数が足りなかったので、お休みです。また明日！`,
+    );
     await log("不成立メッセージをアナウンスチャンネルに送信しました");
     return;
   }
@@ -434,7 +442,7 @@ Deno.cron("daily-pick", "0 15 * * SUN-THU", async () => {
   await notify(
     bot,
     announceChannelId,
-    `今日(${today})は <@${ownerUserId}> と ${mentions} で遊びます！21:00頃を目安に <#${pickupChannels.voiceId}> へどうぞ(連絡は <#${pickupChannels.textId}> で行います。時間は前後してOKです)。`,
+    `今日(${today})は <@${ownerUserId}> と ${mentions} で遊びます！21:00ごろに <#${pickupChannels.voiceId}> に集まってください。連絡は <#${pickupChannels.textId}> で取り合ってください。時間は前後しても大丈夫です！`,
   );
   await log("ピック結果をアナウンスチャンネルに送信しました");
 
@@ -460,7 +468,7 @@ Deno.cron("pickup-start-reminder", "0 12 * * MON-FRI", async () => {
   await notify(
     bot,
     BigInt(pickupTextChannelId),
-    "21:00になりました。開始の目安の時間です(前後してOKです)。",
+    "21:00です。そろそろ始めましょう！前後しても大丈夫です。",
   );
   await log("pickup開始リマインドを送信しました");
 });
@@ -476,7 +484,7 @@ Deno.cron("pickup-end-warning", "15 13 * * MON-FRI", async () => {
   await notify(
     bot,
     BigInt(pickupTextChannelId),
-    "22:15になりました。22:30にVCは終了(強制退出)しますのでご注意ください。",
+    "22:15です。22:30にVCが終了して、自動で退出になります。",
   );
   await log("pickup終了警告を送信しました");
 });
@@ -492,7 +500,7 @@ Deno.cron("pickup-cleanup", "30 13 * * MON-FRI", async () => {
     await notify(
       bot,
       BigInt(pickupTextChannelId),
-      "22:30になりました。お疲れ様でした！VCは終了します。",
+      "22:30です。お疲れさまでした！VCを終了します。",
     );
     await log("終了メッセージをpickup用テキストチャンネルに送信しました");
   }
