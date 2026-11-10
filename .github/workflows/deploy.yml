@@ -41,3 +41,5 @@ jobs:
             "TURSO_TOKEN=$TURSO_TOKEN" \
             | flyctl secrets import --stage
       - run: flyctl deploy --remote-only --ha=false
+      # 週次cronが二重実行されないよう、常に1台に矯正する(待機マシンなどが増えていたら削除される)
+      - run: flyctl scale count 1 --yes --app fly-kate6bot
