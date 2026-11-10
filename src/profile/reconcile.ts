@@ -2,12 +2,14 @@ import type { Database } from "../db.ts";
 import {
   type ChannelManager,
   deleteBioChannelRecord,
+  displayName,
   ensureBioChannel,
   getAllBioChannels,
 } from "./bio.ts";
 
 interface GuildMember {
-  user?: { id: bigint; username: string; bot?: boolean };
+  nick?: string | null;
+  user?: { id: bigint; username: string; globalName?: string | null; bot?: boolean };
 }
 
 export interface ReconcileBot {
@@ -90,15 +92,15 @@ export async function reconcileBioChannels(
     failed: [],
   };
 
-  const memberById = new Map(members.map((m) => [m.user!.id.toString(), m.user!]));
+  const memberById = new Map(members.map((m) => [m.user!.id.toString(), m]));
   const rows = await getAllBioChannels(db);
   const rowByUser = new Map(rows.map((row) => [row.userId, row]));
 
   // 1. メンバーなのにチャンネルが無い → 作成
-  for (const [userId, user] of memberById) {
+  for (const [userId, member] of memberById) {
     if (rowByUser.has(userId)) continue;
     try {
-      const channelId = await ensureBioChannel(bot, db, userId, user.username);
+      const channelId = await ensureBioChannel(bot, db, userId, displayName(member));
       rowByUser.set(userId, { userId, channelId: channelId.toString() });
       result.created.push(userId);
     } catch {
@@ -108,8 +110,8 @@ export async function reconcileBioChannels(
 
   // 2. DBにはあるがDiscord上のチャンネルが消えている → 作り直し
   for (const row of [...rowByUser.values()]) {
-    const user = memberById.get(row.userId);
-    if (!user || result.created.includes(row.userId)) continue;
+    const member = memberById.get(row.userId);
+    if (!member || result.created.includes(row.userId)) continue;
     try {
       await bot.helpers.getChannel(BigInt(row.channelId));
     } catch (error) {
@@ -119,7 +121,7 @@ export async function reconcileBioChannels(
       }
       try {
         await deleteBioChannelRecord(db, row.userId);
-        const channelId = await ensureBioChannel(bot, db, row.userId, user.username);
+        const channelId = await ensureBioChannel(bot, db, row.userId, displayName(member));
         rowByUser.set(row.userId, { userId: row.userId, channelId: channelId.toString() });
         result.recreated.push(row.userId);
       } catch {

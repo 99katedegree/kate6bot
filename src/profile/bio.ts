@@ -1,6 +1,16 @@
 import { ChannelTypes, OverwriteTypes, type PermissionStrings } from "@discordeno/bot";
 import type { Database } from "../db.ts";
 
+export interface MemberNames {
+  nick?: string | null;
+  user?: { globalName?: string | null; username: string };
+}
+
+/** チャンネル名に使う表示名。サーバー内ニックネーム → グローバル表示名 → ユーザー名の順で採用する */
+export function displayName(member: MemberNames): string {
+  return member.nick || member.user?.globalName || member.user?.username || "unknown";
+}
+
 export interface ChannelManager {
   helpers: {
     createChannel: (
@@ -15,7 +25,7 @@ export interface ChannelManager {
     ) => Promise<{ id: bigint }>;
     deleteMessage: (channelId: bigint, messageId: bigint, reason?: string) => Promise<void>;
     getMessage: (channelId: bigint, messageId: bigint) => Promise<{ content: string }>;
-    getUser: (id: bigint) => Promise<{ username: string }>;
+    getMember: (guildId: bigint, userId: bigint) => Promise<MemberNames>;
     editChannel: (
       channelId: bigint,
       options: { name: string },
@@ -78,7 +88,7 @@ export async function ensureBioChannel(
   bot: ChannelManager,
   db: Database,
   userId: string,
-  username: string,
+  name: string,
 ): Promise<bigint> {
   const existing = await getBioChannel(db, userId);
   if (existing) return BigInt(existing.channelId);
@@ -86,7 +96,7 @@ export async function ensureBioChannel(
   const channel = await bot.helpers.createChannel(
     guildId,
     {
-      name: `自己紹介-${username}`,
+      name: `自己紹介-${name}`,
       type: ChannelTypes.GuildText,
       parentId: profileCategoryId,
       permissionOverwrites: [
@@ -139,8 +149,8 @@ export async function getAllBioChannels(
 }
 
 /**
- * 全自己紹介チャンネルの名前を、現在のDiscordユーザー名に合わせて同期する。
- * ユーザー名が変わっていても、見た目のズレを日次で修復する。
+ * 全自己紹介チャンネルの名前を、現在の表示名(ニックネーム/表示名/ユーザー名)に合わせて同期する。
+ * 名前が変わっていても、見た目のズレを日次で修復する。
  */
 export async function syncBioChannelNames(
   bot: ChannelManager,
@@ -151,10 +161,10 @@ export async function syncBioChannelNames(
 
   for (const { userId, channelId } of await getAllBioChannels(db)) {
     try {
-      const user = await bot.helpers.getUser(BigInt(userId));
+      const member = await bot.helpers.getMember(guildId, BigInt(userId));
       await bot.helpers.editChannel(
         BigInt(channelId),
-        { name: `自己紹介-${user.username}` },
+        { name: `自己紹介-${displayName(member)}` },
         "チャンネル名の日次同期",
       );
       updated.push(userId);

@@ -1,6 +1,6 @@
 import { createBot } from "@discordeno/bot";
 import { openDatabase } from "../src/db.ts";
-import { ensureBioChannel } from "../src/profile/bio.ts";
+import { displayName, ensureBioChannel } from "../src/profile/bio.ts";
 
 const db = await openDatabase();
 const guildId = BigInt(Deno.env.get("GUILD_ID")!);
@@ -8,8 +8,8 @@ const guildId = BigInt(Deno.env.get("GUILD_ID")!);
 const bot = createBot({
   token: Deno.env.get("DISCORD_TOKEN")!,
   desiredProperties: {
-    user: { id: true, username: true, toggles: true },
-    member: { user: true },
+    user: { id: true, username: true, globalName: true, toggles: true },
+    member: { user: true, nick: true },
     channel: { id: true },
     message: { content: true },
   },
@@ -21,7 +21,7 @@ for (const member of members) {
   if (member.user?.bot) continue;
 
   const userId = member.user!.id.toString();
-  const channelId = await ensureBioChannel(bot, db, userId, member.user!.username);
+  const channelId = await ensureBioChannel(bot, db, userId, displayName(member));
   console.log(`Ensured bio channel for ${userId}: ${channelId}`);
 }
 

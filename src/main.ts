@@ -22,6 +22,7 @@ import { pickGroup } from "./pickup/pick.ts";
 import { buildPool } from "./pickup/pool.ts";
 import { isSkipped, setSkip } from "./pickup/skip.ts";
 import {
+  displayName,
   ensureBioChannel,
   findBioChannelOwner,
   getBioText,
@@ -72,10 +73,10 @@ const bot = createBot({
   token: Deno.env.get("DISCORD_TOKEN")!,
   intents: GatewayIntents.Guilds | GatewayIntents.GuildMessages | GatewayIntents.GuildMembers,
   desiredProperties: {
-    user: { id: true, username: true, toggles: true },
+    user: { id: true, username: true, globalName: true, toggles: true },
     message: { id: true, content: true, channelId: true },
     channel: { id: true, parentId: true },
-    member: { roles: true, user: true },
+    member: { roles: true, user: true, nick: true },
     interaction: {
       id: true,
       token: true,
@@ -190,11 +191,16 @@ const bot = createBot({
         return;
       }
     },
-    guildMemberAdd: async (_member, user) => {
+    guildMemberAdd: async (member, user) => {
       const userId = user.id.toString();
       await log(`新規メンバーが参加しました(user=${userId}, username=${user.username})`);
 
-      const channelId = await ensureBioChannel(bot, db, userId, user.username);
+      const channelId = await ensureBioChannel(
+        bot,
+        db,
+        userId,
+        displayName({ nick: member.nick, user }),
+      );
       await log(`自己紹介チャンネルを用意しました(user=${userId}, channel=${channelId})`);
 
       try {
@@ -250,7 +256,7 @@ const bot = createBot({
 
 const log = createLogger(bot);
 
-/** サーバーのメンバーと自己紹介チャンネルの差分を確認・修復し、結果をログに残す(起動時と毎日3:00) */
+/** メンバーと自己紹介チャンネルの差分修復と、チャンネル名の表示名への同期を行う(起動時と毎日3:00) */
 async function runBioReconcile(): Promise<void> {
   await log("自己紹介チャンネルの差分チェックを開始します");
   try {
@@ -280,6 +286,13 @@ async function runBioReconcile(): Promise<void> {
   } catch (error) {
     await log(`自己紹介チャンネルの差分チェックに失敗しました: ${error}`);
   }
+
+  const { updated, failed } = await syncBioChannelNames(bot, db);
+  await log(
+    `自己紹介チャンネル名を表示名に同期しました(成功: ${updated.length}件, 失敗: ${
+      failed.join(", ") || "なし"
+    })`,
+  );
 }
 
 // 木曜 20:00 JST(=11:00 UTC): 翌週の段位確認と「今週は参加しない」の受付
@@ -445,16 +458,9 @@ Deno.cron("pickup-cleanup", "30 13 * * MON-FRI", async () => {
   await log("pickup用のテキストチャンネルとVCをクリーンな状態に作り直しました");
 });
 
-// 毎日 3:00 JST(=前日18:00 UTC): 自己紹介チャンネルの差分修復と、チャンネル名のユーザー名への同期
+// 毎日 3:00 JST(=前日18:00 UTC): 自己紹介チャンネルの差分修復と、チャンネル名の表示名への同期
 Deno.cron("bio-channel-name-sync", "0 18 * * *", async () => {
-  await log("自己紹介チャンネル名の同期cronを開始します");
   await runBioReconcile();
-  const { updated, failed } = await syncBioChannelNames(bot, db);
-  await log(
-    `自己紹介チャンネル名を同期しました(成功: ${updated.length}件, 失敗: ${
-      failed.join(", ") || "なし"
-    })`,
-  );
 });
 
 await bot.start();
