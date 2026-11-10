@@ -15,34 +15,56 @@ interface ChannelManager {
 const guildId = BigInt(Deno.env.get("GUILD_ID")!);
 const pickupCategoryId = BigInt(Deno.env.get("PICKUP_CATEGORY_ID")!);
 const PICKUP_VC_NAME = "pickup";
+const PICKUP_TEXT_NAME = "pickup-chat";
 
-export async function getPickupChannelId(db: Database): Promise<string | null> {
-  const result = await db.execute("SELECT channel_id FROM pickup_channel");
-  const id = result.rows[0]?.channel_id;
-  return id === undefined ? null : String(id);
+export interface PickupChannels {
+  voiceId: bigint;
+  textId: bigint;
 }
 
-async function setPickupChannelId(db: Database, channelId: string): Promise<void> {
+/**
+ * botが投稿してよい、pickup用テキストチャンネルのid。
+ * pickupのお知らせ・自己紹介などの投稿は、必ずこのチャンネルに送る。
+ * VCの内蔵チャットには絶対に投稿しないこと(だからVC側のidはここでは返さない)。
+ */
+export async function getPickupTextChannelId(db: Database): Promise<string | null> {
+  const result = await db.execute("SELECT text_channel_id FROM pickup_channel");
+  const id = result.rows[0]?.text_channel_id;
+  return id === undefined || id === null ? null : String(id);
+}
+
+async function getExistingChannelIds(db: Database): Promise<string[]> {
+  const result = await db.execute("SELECT voice_channel_id, text_channel_id FROM pickup_channel");
+  const row = result.rows[0];
+  if (!row) return [];
+  return [row.voice_channel_id, row.text_channel_id]
+    .filter((id) => id !== null && id !== undefined)
+    .map(String);
+}
+
+async function setPickupChannels(db: Database, channels: PickupChannels): Promise<void> {
   await db.batch(
     [
       "DELETE FROM pickup_channel",
-      { sql: "INSERT INTO pickup_channel (channel_id) VALUES (?)", args: [channelId] },
+      {
+        sql: "INSERT INTO pickup_channel (voice_channel_id, text_channel_id) VALUES (?, ?)",
+        args: [channels.voiceId.toString(), channels.textId.toString()],
+      },
     ],
     "write",
   );
 }
 
 /**
- * 既存のpickup用VCを削除し、新規に作り直す。
+ * 既存のpickup用テキストチャンネルとVCを削除し、1つずつ新規に作り直す。
  * チャンネルを丸ごと作り直すことで、過去の会話履歴を含めて完全にリセットする。
  * カテゴリーの子チャンネルとして作るので、権限はカテゴリーから自動継承される。
  */
-export async function recreatePickupVoiceChannel(
+export async function recreatePickupChannels(
   bot: ChannelManager,
   db: Database,
-): Promise<bigint> {
-  const existing = await getPickupChannelId(db);
-  if (existing) {
+): Promise<PickupChannels> {
+  for (const existing of await getExistingChannelIds(db)) {
     try {
       await bot.helpers.deleteChannel(BigInt(existing), "pickup入れ替えによる再作成");
     } catch {
@@ -50,12 +72,18 @@ export async function recreatePickupVoiceChannel(
     }
   }
 
-  const channel = await bot.helpers.createChannel(
+  const text = await bot.helpers.createChannel(
+    guildId,
+    { name: PICKUP_TEXT_NAME, type: ChannelTypes.GuildText, parentId: pickupCategoryId },
+    "pickup入れ替えによる再作成",
+  );
+  const voice = await bot.helpers.createChannel(
     guildId,
     { name: PICKUP_VC_NAME, type: ChannelTypes.GuildVoice, parentId: pickupCategoryId },
     "pickup入れ替えによる再作成",
   );
 
-  await setPickupChannelId(db, channel.id.toString());
-  return channel.id;
+  const channels = { voiceId: voice.id, textId: text.id };
+  await setPickupChannels(db, channels);
+  return channels;
 }

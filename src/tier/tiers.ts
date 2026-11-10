@@ -13,6 +13,11 @@ export const TIER_ROLE_IDS: Record<Tier, bigint> = {
   "最高峰": 1569392657564831794n,
 };
 
+/** 画面に表示する段位名。数字の段位は「1段」のように表示し、DBやロールの対応は元の値のまま使う */
+export function tierLabel(tier: Tier): string {
+  return /^\d+$/.test(tier) ? `${tier}段` : tier;
+}
+
 export function isTier(value: string): value is Tier {
   return (TIERS as readonly string[]).includes(value);
 }

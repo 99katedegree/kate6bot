@@ -17,7 +17,7 @@ import {
   grantPickupRole,
   revokePickupRole,
 } from "./pickup/role.ts";
-import { getPickupChannelId, recreatePickupVoiceChannel } from "./pickup/channel.ts";
+import { getPickupTextChannelId, recreatePickupChannels } from "./pickup/channel.ts";
 import { pickGroup } from "./pickup/pick.ts";
 import { buildPool } from "./pickup/pool.ts";
 import { isSkipped, setSkip } from "./pickup/skip.ts";
@@ -28,9 +28,17 @@ import {
   replaceBioMessage,
   syncBioChannelNames,
 } from "./profile/bio.ts";
-import { jstDateString, upcomingMonday } from "./schedule.ts";
+import { reconcileBioChannels } from "./profile/reconcile.ts";
+import { jstDateString, upcomingMonday, weekStartMonday } from "./schedule.ts";
 import { clearTier, getTier, setTier } from "./tier/members.ts";
-import { extractTierFromRoles, isTier, isTopTier, TIER_ROLE_IDS, TIERS } from "./tier/tiers.ts";
+import {
+  extractTierFromRoles,
+  isTier,
+  isTopTier,
+  TIER_ROLE_IDS,
+  tierLabel,
+  TIERS,
+} from "./tier/tiers.ts";
 
 const db = await openDatabase();
 const guildId = BigInt(Deno.env.get("GUILD_ID")!);
@@ -52,7 +60,7 @@ function tierSelectMessage(): InteractionCallbackData {
             type: MessageComponentTypes.SelectMenu,
             customId: TIER_SELECT_CUSTOM_ID,
             placeholder: "段位を選択",
-            options: TIERS.map((tier) => ({ label: tier, value: tier })),
+            options: TIERS.map((tier) => ({ label: tierLabel(tier), value: tier })),
           },
         ],
       },
@@ -64,10 +72,10 @@ const bot = createBot({
   token: Deno.env.get("DISCORD_TOKEN")!,
   intents: GatewayIntents.Guilds | GatewayIntents.GuildMessages | GatewayIntents.GuildMembers,
   desiredProperties: {
-    user: { id: true, username: true },
+    user: { id: true, username: true, toggles: true },
     message: { id: true, content: true, channelId: true },
-    channel: { id: true },
-    member: { roles: true },
+    channel: { id: true, parentId: true },
+    member: { roles: true, user: true },
     interaction: {
       id: true,
       token: true,
@@ -81,6 +89,7 @@ const bot = createBot({
     ready: async ({ shardId, user }) => {
       await log(`Shard ${shardId} ready as ${user.username}`);
       await applyManagedPermissions(bot, log);
+      await runBioReconcile();
     },
     interactionCreate: async (interaction) => {
       if (
@@ -159,9 +168,12 @@ const bot = createBot({
         await log(`DBのtierを更新しました(user=${userId}, tier=${selected})`);
 
         const note = isTopTier(selected)
-          ? "(この段位は2人パーティ制限があるため、週次ピックは1人のみになります)"
+          ? "(この段位は2人パーティ制限があるため、ピックは1人のみになります)"
           : "";
-        await respondPrivately(interaction, `段位を「${selected}」に設定しました。${note}`);
+        await respondPrivately(
+          interaction,
+          `段位を「${tierLabel(selected)}」に設定しました。${note}`,
+        );
         return;
       }
 
@@ -238,7 +250,39 @@ const bot = createBot({
 
 const log = createLogger(bot);
 
-// [tier-reminder] 木曜 20:00 JST(=11:00 UTC)
+/** サーバーのメンバーと自己紹介チャンネルの差分を確認・修復し、結果をログに残す(起動時と毎日3:00) */
+async function runBioReconcile(): Promise<void> {
+  await log("自己紹介チャンネルの差分チェックを開始します");
+  try {
+    const r = await reconcileBioChannels(bot, db);
+    const list = (ids: string[]) => ids.length > 0 ? ` [${ids.join(", ")}]` : "";
+    await log(
+      `自己紹介チャンネルの差分チェック完了(メンバー${r.memberCount}人): ` +
+        `新規作成${r.created.length}件${list(r.created)}, ` +
+        `作り直し${r.recreated.length}件${list(r.recreated)}, ` +
+        `削除${r.removed.length}件${list(r.removed)}, ` +
+        `失敗${r.failed.length}件${list(r.failed)}`,
+    );
+    if (r.removalSkipped.length > 0) {
+      await log(
+        `警告: サーバーを抜けた人が${r.removalSkipped.length}人と多いため、安全のため削除を見送りました。メンバー取得の異常でないか確認してください:${
+          list(r.removalSkipped)
+        }`,
+      );
+    }
+    if (r.untrackedChannels.length > 0) {
+      await log(
+        `警告: profileカテゴリー配下にDBと紐付かないチャンネルがあります(自動では削除しません):${
+          r.untrackedChannels.map((id) => `<#${id}>`).join(" ")
+        }`,
+      );
+    }
+  } catch (error) {
+    await log(`自己紹介チャンネルの差分チェックに失敗しました: ${error}`);
+  }
+}
+
+// 木曜 20:00 JST(=11:00 UTC): 翌週の段位確認と「今週は参加しない」の受付
 Deno.cron("tier-reminder", "0 11 * * 4", async () => {
   await log("段位確認リマインドのcronを開始します");
   const weekOf = upcomingMonday(new Date());
@@ -268,44 +312,53 @@ Deno.cron("tier-reminder", "0 11 * * 4", async () => {
   await log(`段位確認リマインドを送信しました(対象週: ${weekOf})`);
 });
 
-// 月曜 0:00 JST(=前日15:00 UTC)
-Deno.cron("weekly-pick", "0 15 * * SUN", async () => {
-  await log("週次ランダムピックのcronを開始します");
-  const weekOf = jstDateString(new Date());
-  await log(`対象週を計算しました: ${weekOf}`);
+// 月〜金 0:00 JST(=前日 日〜木 15:00 UTC)
+Deno.cron("daily-pick", "0 15 * * SUN-THU", async () => {
+  await log("ランダムピックのcronを開始します");
+  const now = new Date();
+  const today = jstDateString(now);
+  // 「参加しない」は週単位なので、今日が属する週の月曜日で照合する
+  const weekOf = weekStartMonday(now);
+  await log(`対象日を計算しました: ${today}(対象週: ${weekOf})`);
 
   const revoked = await revokePickupRole(bot, db);
   await log(`前回のpickupロールを剥奪しました(対象: ${revoked.join(", ") || "なし"})`);
 
-  const pickupChannelId = await recreatePickupVoiceChannel(bot, db);
-  await log(`pickup用VCを作り直しました(新チャンネルid=${pickupChannelId})`);
+  const pickupChannels = await recreatePickupChannels(bot, db);
+  await log(
+    `pickup用のテキストチャンネルとVCを作り直しました(text=${pickupChannels.textId}, voice=${pickupChannels.voiceId})`,
+  );
 
   const ownerTier = await getTier(db, ownerUserId);
   await log(`自分の段位を取得しました(user=${ownerUserId}, tier=${ownerTier ?? "未設定"})`);
 
   if (!ownerTier) {
-    await log(`週次ピック不成立: 自分(${ownerUserId})の段位が未設定`);
+    await log(`ピック不成立: 自分(${ownerUserId})の段位が未設定`);
     return;
   }
 
   if (await isSkipped(db, ownerUserId, weekOf)) {
-    await log(`週次ピック見送り: 自分(${ownerUserId})が今週は参加しない設定`);
+    await log(`ピック見送り: 自分(${ownerUserId})が今週は参加しない設定`);
     return;
   }
 
   const pool = await buildPool(db, ownerUserId, ownerTier, weekOf);
-  await log(`プールを構築しました(週=${weekOf}, 人数=${pool.length}, members=${pool.join(", ")})`);
+  await log(
+    `プールを構築しました(日=${today}, 週=${weekOf}, 人数=${pool.length}, members=${
+      pool.join(", ")
+    })`,
+  );
 
   const result = await pickGroup(db, ownerTier, pool);
 
   if (!result) {
-    await log(`週次ピック不成立(対象週: ${weekOf}, プール: ${pool.length}人)`);
-    await notify(bot, announceChannelId, `今週(${weekOf})は候補が足りず不成立でした。`);
+    await log(`ピック不成立(対象日: ${today}, プール: ${pool.length}人)`);
+    await notify(bot, announceChannelId, `今日(${today})は候補が足りず不成立でした。`);
     await log("不成立メッセージをアナウンスチャンネルに送信しました");
     return;
   }
 
-  await log(`ピックが成立しました(対象週: ${weekOf}): ${result.selected.join(", ")}`);
+  await log(`ピックが成立しました(対象日: ${today}): ${result.selected.join(", ")}`);
 
   const newHolders = [ownerUserId, ...result.selected];
   await grantPickupRole(bot, db, newHolders);
@@ -315,7 +368,7 @@ Deno.cron("weekly-pick", "0 15 * * SUN", async () => {
   await notify(
     bot,
     announceChannelId,
-    `今週(${weekOf})は <@${ownerUserId}> と ${mentions} で遊びます！21:00頃を目安に <#${pickupChannelId}> へどうぞ(時間は前後してOKです)。`,
+    `今日(${today})は <@${ownerUserId}> と ${mentions} で遊びます！21:00頃を目安に <#${pickupChannels.voiceId}> へどうぞ(連絡は <#${pickupChannels.textId}> で行います。時間は前後してOKです)。`,
   );
   await log("ピック結果をアナウンスチャンネルに送信しました");
 
@@ -325,57 +378,57 @@ Deno.cron("weekly-pick", "0 15 * * SUN", async () => {
       await log(`自己紹介が未設定のためスキップしました(user=${userId})`);
       continue;
     }
-    await notify(bot, pickupChannelId, `🙋 <@${userId}> の自己紹介:\n${bio}`);
-    await log(`自己紹介をpickup用VCに投稿しました(user=${userId})`);
+    await notify(bot, pickupChannels.textId, `🙋 <@${userId}> の自己紹介:\n${bio}`);
+    await log(`自己紹介をpickup用テキストチャンネルに投稿しました(user=${userId})`);
   }
 });
 
-// 月曜 21:00 JST(=12:00 UTC): 開始目安のリマインド
-Deno.cron("pickup-start-reminder", "0 12 * * 1", async () => {
+// 月〜金 21:00 JST(=12:00 UTC): 開始目安のリマインド
+Deno.cron("pickup-start-reminder", "0 12 * * MON-FRI", async () => {
   const holders = await getCurrentPickupHolders(db);
-  const pickupChannelId = await getPickupChannelId(db);
-  if (holders.length === 0 || !pickupChannelId) {
-    await log("pickup開始リマインド: 今週は対象者がいないためスキップ");
+  const pickupTextChannelId = await getPickupTextChannelId(db);
+  if (holders.length === 0 || !pickupTextChannelId) {
+    await log("pickup開始リマインド: 今日は対象者がいないためスキップ");
     return;
   }
   await notify(
     bot,
-    BigInt(pickupChannelId),
+    BigInt(pickupTextChannelId),
     "21:00になりました。開始の目安の時間です(前後してOKです)。",
   );
   await log("pickup開始リマインドを送信しました");
 });
 
-// 月曜 22:15 JST(=13:15 UTC): 終了15分前の警告
-Deno.cron("pickup-end-warning", "15 13 * * 1", async () => {
+// 月〜金 22:15 JST(=13:15 UTC): 終了15分前の警告
+Deno.cron("pickup-end-warning", "15 13 * * MON-FRI", async () => {
   const holders = await getCurrentPickupHolders(db);
-  const pickupChannelId = await getPickupChannelId(db);
-  if (holders.length === 0 || !pickupChannelId) {
-    await log("pickup終了警告: 今週は対象者がいないためスキップ");
+  const pickupTextChannelId = await getPickupTextChannelId(db);
+  if (holders.length === 0 || !pickupTextChannelId) {
+    await log("pickup終了警告: 今日は対象者がいないためスキップ");
     return;
   }
   await notify(
     bot,
-    BigInt(pickupChannelId),
-    "22:15になりました。22:30にこのVCは終了(強制退出)しますのでご注意ください。",
+    BigInt(pickupTextChannelId),
+    "22:15になりました。22:30にVCは終了(強制退出)しますのでご注意ください。",
   );
   await log("pickup終了警告を送信しました");
 });
 
-// 月曜 22:30 JST(=13:30 UTC): 何があってもクリーンアップ
-Deno.cron("pickup-cleanup", "30 13 * * 1", async () => {
+// 月〜金 22:30 JST(=13:30 UTC): 何があってもクリーンアップ
+Deno.cron("pickup-cleanup", "30 13 * * MON-FRI", async () => {
   await log("pickupクリーンアップのcronを開始します");
 
   const holders = await getCurrentPickupHolders(db);
-  const pickupChannelId = await getPickupChannelId(db);
+  const pickupTextChannelId = await getPickupTextChannelId(db);
 
-  if (pickupChannelId) {
+  if (pickupTextChannelId) {
     await notify(
       bot,
-      BigInt(pickupChannelId),
-      "22:30になりました。お疲れ様でした！このVCは終了します。",
+      BigInt(pickupTextChannelId),
+      "22:30になりました。お疲れ様でした！VCは終了します。",
     );
-    await log("終了メッセージをpickup用VCに送信しました");
+    await log("終了メッセージをpickup用テキストチャンネルに送信しました");
   }
 
   const { succeeded, skipped } = await forceDisconnectFromVoice(bot, holders);
@@ -388,13 +441,14 @@ Deno.cron("pickup-cleanup", "30 13 * * 1", async () => {
   const revoked = await revokePickupRole(bot, db);
   await log(`pickupロールを剥奪しました(対象: ${revoked.join(", ") || "なし"})`);
 
-  await recreatePickupVoiceChannel(bot, db);
-  await log("pickup用VCをクリーンな状態に作り直しました");
+  await recreatePickupChannels(bot, db);
+  await log("pickup用のテキストチャンネルとVCをクリーンな状態に作り直しました");
 });
 
-// 毎日 3:00 JST(=前日18:00 UTC): 自己紹介チャンネル名をDiscordのユーザー名に同期
+// 毎日 3:00 JST(=前日18:00 UTC): 自己紹介チャンネルの差分修復と、チャンネル名のユーザー名への同期
 Deno.cron("bio-channel-name-sync", "0 18 * * *", async () => {
   await log("自己紹介チャンネル名の同期cronを開始します");
+  await runBioReconcile();
   const { updated, failed } = await syncBioChannelNames(bot, db);
   await log(
     `自己紹介チャンネル名を同期しました(成功: ${updated.length}件, 失敗: ${

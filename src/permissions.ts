@@ -62,7 +62,7 @@ export const MANAGED_PERMISSIONS: ManagedPermission[] = [
     deny: ["VIEW_CHANNEL"],
   },
   {
-    description: "pickupロールにVC+VC内チャットを許可",
+    description: "pickupロールにテキストチャンネルとVCの利用を許可",
     channel: "pickupCategory",
     role: "pickup",
     allow: ["VIEW_CHANNEL", "CONNECT", "SPEAK", "SEND_MESSAGES"],

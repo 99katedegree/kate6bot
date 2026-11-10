@@ -32,7 +32,8 @@ Table current_pickup {
 }
 
 Table pickup_channel {
-  channel_id text [not null, note: "現在のpickup用VCのチャンネルid。毎週削除→再作成するたびに更新される(常に1行)"]
+  voice_channel_id text [not null, note: "現在のpickup用VCのチャンネルid。毎日削除→再作成するたびに更新される(常に1行)"]
+  text_channel_id text [note: "現在のpickup用テキストチャンネルのid。botの投稿はこちらにのみ行い、VCの内蔵チャットには投稿しない"]
 }
 
 Table bio_channels {

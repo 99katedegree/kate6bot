@@ -1,7 +1,7 @@
 import { ChannelTypes, OverwriteTypes, type PermissionStrings } from "@discordeno/bot";
 import type { Database } from "../db.ts";
 
-interface ChannelManager {
+export interface ChannelManager {
   helpers: {
     createChannel: (
       guildId: bigint,
@@ -53,6 +53,13 @@ export async function findBioChannelOwner(db: Database, channelId: string): Prom
   });
   const id = result.rows[0]?.discord_user_id;
   return id === undefined ? null : String(id);
+}
+
+export async function deleteBioChannelRecord(db: Database, userId: string): Promise<void> {
+  await db.execute({
+    sql: "DELETE FROM bio_channels WHERE discord_user_id = ?",
+    args: [userId],
+  });
 }
 
 export async function setLastMessageId(
