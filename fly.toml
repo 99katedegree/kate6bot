@@ -1,0 +1,16 @@
+app = "fly-kate6bot"
+primary_region = "nrt"
+
+[build]
+
+[processes]
+  app = "deno task start"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  processes = ["app"]
+
+[[restart]]
+  policy = "always"
+  processes = ["app"]

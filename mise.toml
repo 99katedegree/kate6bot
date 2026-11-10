@@ -1,0 +1,4 @@
+[tools]
+deno = "2.9.8"
+flyctl = "0.5.6"
+turso = "1.0.34"

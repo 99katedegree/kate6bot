@@ -1,0 +1,43 @@
+name: Fly Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    concurrency: deploy-group
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # GitHub Secrets を Fly の secrets に反映する（値は .env から `deno task sync-env` で登録）
+      - name: Sync secrets to Fly
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          GUILD_ID: ${{ secrets.GUILD_ID }}
+          OWNER_USER_ID: ${{ secrets.OWNER_USER_ID }}
+          LOG_CHANNEL_ID: ${{ secrets.LOG_CHANNEL_ID }}
+          ANNOUNCE_CHANNEL_ID: ${{ secrets.ANNOUNCE_CHANNEL_ID }}
+          PICKUP_CATEGORY_ID: ${{ secrets.PICKUP_CATEGORY_ID }}
+          PROFILE_CATEGORY_ID: ${{ secrets.PROFILE_CATEGORY_ID }}
+          PICKUP_ROLE_ID: ${{ secrets.PICKUP_ROLE_ID }}
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+        run: |
+          printf '%s\n' \
+            "DISCORD_TOKEN=$DISCORD_TOKEN" \
+            "GUILD_ID=$GUILD_ID" \
+            "OWNER_USER_ID=$OWNER_USER_ID" \
+            "LOG_CHANNEL_ID=$LOG_CHANNEL_ID" \
+            "ANNOUNCE_CHANNEL_ID=$ANNOUNCE_CHANNEL_ID" \
+            "PICKUP_CATEGORY_ID=$PICKUP_CATEGORY_ID" \
+            "PROFILE_CATEGORY_ID=$PROFILE_CATEGORY_ID" \
+            "PICKUP_ROLE_ID=$PICKUP_ROLE_ID" \
+            "TURSO_URL=$TURSO_URL" \
+            "TURSO_TOKEN=$TURSO_TOKEN" \
+            | flyctl secrets import --stage
+      - run: flyctl deploy --remote-only
