@@ -19,6 +19,13 @@ export function bioChannelName(name: string): string {
   return `【自己紹介】${name}`;
 }
 
+export interface PermissionOverwrite {
+  id: bigint;
+  type: OverwriteTypes;
+  allow?: PermissionStrings[];
+  deny?: PermissionStrings[];
+}
+
 export interface ChannelManager {
   helpers: {
     createChannel: (
@@ -27,13 +34,18 @@ export interface ChannelManager {
         name: string;
         type: ChannelTypes;
         parentId: bigint;
-        permissionOverwrites: { id: bigint; type: OverwriteTypes; allow: PermissionStrings[] }[];
+        permissionOverwrites: PermissionOverwrite[];
       },
       reason?: string,
     ) => Promise<{ id: bigint }>;
     deleteMessage: (channelId: bigint, messageId: bigint, reason?: string) => Promise<void>;
     getMessage: (channelId: bigint, messageId: bigint) => Promise<{ content: string }>;
     getMember: (guildId: bigint, userId: bigint) => Promise<MemberNames>;
+    editChannelPermissionOverrides: (
+      channelId: bigint,
+      options: PermissionOverwrite,
+      reason?: string,
+    ) => Promise<void>;
     editChannel: (
       channelId: bigint,
       options: { name: string },
@@ -44,6 +56,22 @@ export interface ChannelManager {
 
 const guildId = BigInt(Deno.env.get("GUILD_ID")!);
 const profileCategoryId = BigInt(Deno.env.get("PROFILE_CATEGORY_ID")!);
+
+/**
+ * 自己紹介チャンネルの権限。持ち主だけが見られて投稿できる。
+ * チャンネルに権限を直接指定するとカテゴリーの設定は引き継がれないため、
+ * 「全員に非表示」もここで明示する。
+ */
+export function bioChannelOverwrites(userId: string): PermissionOverwrite[] {
+  return [
+    { id: guildId, type: OverwriteTypes.Role, deny: ["VIEW_CHANNEL"] },
+    {
+      id: BigInt(userId),
+      type: OverwriteTypes.Member,
+      allow: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+    },
+  ];
+}
 
 interface BioChannel {
   channelId: string;
@@ -107,13 +135,7 @@ export async function ensureBioChannel(
       name: bioChannelName(name),
       type: ChannelTypes.GuildText,
       parentId: profileCategoryId,
-      permissionOverwrites: [
-        {
-          id: BigInt(userId),
-          type: OverwriteTypes.Member,
-          allow: ["VIEW_CHANNEL", "SEND_MESSAGES"],
-        },
-      ],
+      permissionOverwrites: bioChannelOverwrites(userId),
     },
     "自己紹介チャンネルの初回作成",
   );
@@ -157,7 +179,7 @@ export async function getAllBioChannels(
 }
 
 /**
- * 全自己紹介チャンネルの名前を、現在の表示名(ニックネーム/表示名/ユーザー名)に合わせて同期する。
+ * 全自己紹介チャンネルの名前を、現在の表示名(ニックネーム/表示名/ユーザー名)に合わせて同期し、権限も再適用する。
  * 名前が変わっていても、見た目のズレを日次で修復する。
  */
 export async function syncBioChannelNames(
@@ -175,6 +197,14 @@ export async function syncBioChannelNames(
         { name: bioChannelName(displayName(member)) },
         "チャンネル名の日次同期",
       );
+      // 権限もあわせて整える(過去に作った自己紹介チャンネルが、全員に見えるままになっていないように)
+      for (const overwrite of bioChannelOverwrites(userId)) {
+        await bot.helpers.editChannelPermissionOverrides(
+          BigInt(channelId),
+          overwrite,
+          "自己紹介チャンネルの権限を日次で再適用",
+        );
+      }
       updated.push(userId);
     } catch {
       failed.push(userId);

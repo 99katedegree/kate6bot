@@ -10,7 +10,7 @@ import { createLogger } from "./discord/log.ts";
 import { notify } from "./discord/notify.ts";
 import { respondPrivately } from "./discord/respond.ts";
 import { openDatabase } from "./db.ts";
-import { applyManagedPermissions } from "./permissions.ts";
+import { applyManagedPermissions, applyPickupChildPermissions } from "./permissions.ts";
 import {
   forceDisconnectFromVoice,
   getCurrentPickupHolders,
@@ -19,6 +19,7 @@ import {
 } from "./pickup/role.ts";
 import {
   ensurePickupChannels,
+  getPickupChannelIds,
   getPickupTextChannelId,
   recreatePickupChannels,
 } from "./pickup/channel.ts";
@@ -96,18 +97,7 @@ const bot = createBot({
   events: {
     ready: async ({ shardId, user }) => {
       await log(`Shard ${shardId} ready as ${user.username}`);
-      await applyManagedPermissions(bot, log);
-      try {
-        const created = await ensurePickupChannels(bot, db);
-        await log(
-          created
-            ? "pickup用のテキストチャンネルとVCが揃っていなかったため作成しました"
-            : "pickup用のテキストチャンネルとVCは揃っています",
-        );
-      } catch (error) {
-        await log(`pickup用チャンネルの確認に失敗しました: ${error}`);
-      }
-      await runBioReconcile();
+      await runMaintenance();
     },
     interactionCreate: async (interaction) => {
       if (
@@ -250,26 +240,8 @@ const bot = createBot({
         );
         await log(`段位選択メニューをDMで送信しました(user=${userId})`);
       } catch (error) {
+        // DMを閉じている人には送れない。自己紹介チャンネルは作成済みなので、ここでは記録のみ行う
         await log(`DM送信に失敗しました(user=${userId}): ${error}`);
-        // DMを閉じている人にも届くよう、アナウンスチャンネルから案内する
-        await notify(bot, announceChannelId, {
-          content:
-            `<@${userId}> ようこそ！DMを送れなかったので、こちらで案内しますね。\nあなた専用の自己紹介チャンネルは <#${channelId}> です。段位は下のボタンから選べます。`,
-          components: [
-            {
-              type: MessageComponentTypes.ActionRow,
-              components: [
-                {
-                  type: MessageComponentTypes.Button,
-                  style: ButtonStyles.Primary,
-                  label: "段位を設定する",
-                  customId: OPEN_TIER_SELECT_BUTTON,
-                },
-              ],
-            },
-          ],
-        });
-        await log(`アナウンスチャンネルから案内しました(user=${userId})`);
       }
     },
     guildMemberUpdate: async (member, user) => {
@@ -313,7 +285,30 @@ const bot = createBot({
 
 const log = createLogger(bot);
 
-/** メンバーと自己紹介チャンネルの差分修復と、チャンネル名の表示名への同期を行う(起動時と毎日3:00) */
+/**
+ * 起動時と毎日3:00(JST)に同じ内容を実行する保守処理。
+ * 起動しなかった期間があっても、毎日のバッチで必ず状態が整う。
+ * - 管理対象の権限設定の再適用
+ * - pickup用のテキストチャンネル/VCが揃っているかの確認(無ければ作成)と、その権限の再適用
+ * - 自己紹介チャンネルの差分修復と、チャンネル名・権限の同期
+ */
+async function runMaintenance(): Promise<void> {
+  await applyManagedPermissions(bot, log);
+  try {
+    const created = await ensurePickupChannels(bot, db);
+    await log(
+      created
+        ? "pickup用のテキストチャンネルとVCが揃っていなかったため作成しました"
+        : "pickup用のテキストチャンネルとVCは揃っています",
+    );
+  } catch (error) {
+    await log(`pickup用チャンネルの確認に失敗しました: ${error}`);
+  }
+  await applyPickupChildPermissions(bot, await getPickupChannelIds(db), log);
+  await runBioReconcile();
+}
+
+/** メンバーと自己紹介チャンネルの差分修復と、チャンネル名の表示名への同期を行う*/
 async function runBioReconcile(): Promise<void> {
   await log("自己紹介チャンネルの差分チェックを開始します");
   try {
@@ -426,7 +421,7 @@ Deno.cron("daily-pick", "0 15 * * SUN-THU", async () => {
     await notify(
       bot,
       announceChannelId,
-      `今日(${today})は人数が足りなかったので、お休みです。また明日！`,
+      `今日は人数が足りず、ピックアップできませんでした。`,
     );
     await log("不成立メッセージをアナウンスチャンネルに送信しました");
     return;
@@ -442,7 +437,7 @@ Deno.cron("daily-pick", "0 15 * * SUN-THU", async () => {
   await notify(
     bot,
     announceChannelId,
-    `今日(${today})は <@${ownerUserId}> と ${mentions} で遊びます！21:00ごろに <#${pickupChannels.voiceId}> に集まってください。連絡は <#${pickupChannels.textId}> で取り合ってください。時間は前後しても大丈夫です！`,
+    `今日は <@${ownerUserId}> と ${mentions} をピックアップしました！`,
   );
   await log("ピック結果をアナウンスチャンネルに送信しました");
 
@@ -452,25 +447,9 @@ Deno.cron("daily-pick", "0 15 * * SUN-THU", async () => {
       await log(`自己紹介が未設定のためスキップしました(user=${userId})`);
       continue;
     }
-    await notify(bot, pickupChannels.textId, `🙋 <@${userId}> の自己紹介:\n${bio}`);
+    await notify(bot, pickupChannels.textId, `<@${userId}> の自己紹介\n\n${bio}`);
     await log(`自己紹介をpickup用テキストチャンネルに投稿しました(user=${userId})`);
   }
-});
-
-// 月〜金 21:00 JST(=12:00 UTC): 開始目安のリマインド
-Deno.cron("pickup-start-reminder", "0 12 * * MON-FRI", async () => {
-  const holders = await getCurrentPickupHolders(db);
-  const pickupTextChannelId = await getPickupTextChannelId(db);
-  if (holders.length === 0 || !pickupTextChannelId) {
-    await log("pickup開始リマインド: 今日は対象者がいないためスキップ");
-    return;
-  }
-  await notify(
-    bot,
-    BigInt(pickupTextChannelId),
-    "21:00です。そろそろ始めましょう！前後しても大丈夫です。",
-  );
-  await log("pickup開始リマインドを送信しました");
 });
 
 // 月〜金 22:15 JST(=13:15 UTC): 終了15分前の警告
@@ -519,9 +498,9 @@ Deno.cron("pickup-cleanup", "30 13 * * MON-FRI", async () => {
   await log("pickup用のテキストチャンネルとVCをクリーンな状態に作り直しました");
 });
 
-// 毎日 3:00 JST(=前日18:00 UTC): 自己紹介チャンネルの差分修復と、チャンネル名の表示名への同期
-Deno.cron("bio-channel-name-sync", "0 18 * * *", async () => {
-  await runBioReconcile();
+// 毎日 3:00 JST(=前日18:00 UTC): 起動時と同じ保守処理(権限・pickupチャンネル・自己紹介チャンネル)
+Deno.cron("daily-maintenance", "0 18 * * *", async () => {
+  await runMaintenance();
 });
 
 await bot.start();

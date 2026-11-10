@@ -35,6 +35,11 @@ export async function getPickupTextChannelId(db: Database): Promise<string | nul
   return id === undefined || id === null ? null : String(id);
 }
 
+/** pickup用のテキストチャンネルとVCのid(権限の再適用に使う) */
+export async function getPickupChannelIds(db: Database): Promise<bigint[]> {
+  return (await getExistingChannelIds(db)).map(BigInt);
+}
+
 async function getExistingChannelIds(db: Database): Promise<string[]> {
   const result = await db.execute("SELECT voice_channel_id, text_channel_id FROM pickup_channel");
   const row = result.rows[0];

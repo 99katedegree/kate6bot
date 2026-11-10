@@ -38,9 +38,9 @@ interface ManagedPermission {
 }
 
 /**
- * このアプリが起動時に強制する、固定チャンネル/カテゴリーの権限の宣言的な一覧。
- * ここが唯一のソース・オブ・トゥルースで、ズレていても起動の度に全て上書きされる。
- * (ユーザーごとの自己紹介チャンネルの権限は動的に決まるため、ここには含まれない。bioChannel.ts参照)
+ * このアプリが起動時と毎日の保守処理で強制する、固定チャンネル/カテゴリーの権限の宣言的な一覧。
+ * ここが唯一のソース・オブ・トゥルースで、ズレていても保守処理の度に全て上書きされる。
+ * (ユーザーごとの自己紹介チャンネルの権限は動的に決まるため、ここには含まれない。profile/bio.ts参照)
  */
 export const MANAGED_PERMISSIONS: ManagedPermission[] = [
   {
@@ -76,7 +76,7 @@ export const MANAGED_PERMISSIONS: ManagedPermission[] = [
 ];
 
 /**
- * 起動時に毎回実行し、MANAGED_PERMISSIONS を1件ずつ適用する。
+ * 保守処理(起動時と毎日)で実行し、MANAGED_PERMISSIONS を1件ずつ適用する。
  * 1件失敗しても他の適用は止めず、成否をそれぞれログに残す。
  */
 export async function applyManagedPermissions(
@@ -98,6 +98,36 @@ export async function applyManagedPermissions(
       await log(`OK: ${entry.description}`);
     } catch (error) {
       await log(`NG: ${entry.description}: ${error}`);
+    }
+  }
+}
+
+/**
+ * pickupカテゴリーに設定した権限を、中のチャンネル(テキスト/VC)にも直接適用する。
+ * Discordはカテゴリーの権限を変えても既存の子チャンネルには反映しないため、ここで揃える。
+ */
+export async function applyPickupChildPermissions(
+  bot: ChannelPermissionEditor,
+  channelIds: bigint[],
+  log: (message: string) => Promise<void>,
+): Promise<void> {
+  const entries = MANAGED_PERMISSIONS.filter((entry) => entry.channel === "pickupCategory");
+  for (const channelId of channelIds) {
+    for (const entry of entries) {
+      try {
+        await bot.helpers.editChannelPermissionOverrides(
+          channelId,
+          {
+            id: ROLE_IDS[entry.role],
+            type: OverwriteTypes.Role,
+            allow: entry.allow,
+            deny: entry.deny,
+          },
+          `pickupチャンネルの権限を再適用: ${entry.description}`,
+        );
+      } catch (error) {
+        await log(`NG: pickupチャンネル(${channelId})の権限: ${entry.description}: ${error}`);
+      }
     }
   }
 }
