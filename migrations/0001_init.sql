@@ -22,8 +22,11 @@ CREATE TABLE current_pickup (
   discord_user_id TEXT PRIMARY KEY
 );
 
+-- pickupカテゴリーは「テキストチャンネル1つ + ボイスチャンネル1つ」の構成。
+-- botの投稿はテキストチャンネルにのみ行い、VCの内蔵チャットには一切投稿しない。
 CREATE TABLE pickup_channel (
-  channel_id TEXT NOT NULL
+  voice_channel_id TEXT NOT NULL,
+  text_channel_id TEXT
 );
 
 CREATE TABLE bio_channels (
