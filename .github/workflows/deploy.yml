@@ -22,6 +22,7 @@ jobs:
           OWNER_USER_ID: ${{ secrets.OWNER_USER_ID }}
           LOG_CHANNEL_ID: ${{ secrets.LOG_CHANNEL_ID }}
           ANNOUNCE_CHANNEL_ID: ${{ secrets.ANNOUNCE_CHANNEL_ID }}
+          ANONYMOUS_CHANNEL_ID: ${{ secrets.ANONYMOUS_CHANNEL_ID }}
           PICKUP_CATEGORY_ID: ${{ secrets.PICKUP_CATEGORY_ID }}
           PROFILE_CATEGORY_ID: ${{ secrets.PROFILE_CATEGORY_ID }}
           PICKUP_ROLE_ID: ${{ secrets.PICKUP_ROLE_ID }}
@@ -34,6 +35,7 @@ jobs:
             "OWNER_USER_ID=$OWNER_USER_ID" \
             "LOG_CHANNEL_ID=$LOG_CHANNEL_ID" \
             "ANNOUNCE_CHANNEL_ID=$ANNOUNCE_CHANNEL_ID" \
+            "ANONYMOUS_CHANNEL_ID=$ANONYMOUS_CHANNEL_ID" \
             "PICKUP_CATEGORY_ID=$PICKUP_CATEGORY_ID" \
             "PROFILE_CATEGORY_ID=$PROFILE_CATEGORY_ID" \
             "PICKUP_ROLE_ID=$PICKUP_ROLE_ID" \

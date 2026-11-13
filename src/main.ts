@@ -17,6 +17,13 @@ import {
   ensureWelcomeChannel,
   getWelcomeChannel,
 } from "./welcome/channel.ts";
+import {
+  boardChannelId,
+  boardMessageUrl,
+  ensureBoardTopic,
+  type IncomingAttachment,
+  relayToBoard,
+} from "./anonymous/board.ts";
 import { applyGuildSettings } from "./guild-settings.ts";
 import { applyManagedPermissions, applyPickupChildPermissions } from "./permissions.ts";
 import {
@@ -87,11 +94,20 @@ function tierSelectMessage(
 
 const bot = createBot({
   token: Deno.env.get("DISCORD_TOKEN")!,
-  intents: GatewayIntents.Guilds | GatewayIntents.GuildMessages | GatewayIntents.GuildMembers,
+  intents: GatewayIntents.Guilds | GatewayIntents.GuildMessages | GatewayIntents.GuildMembers |
+    GatewayIntents.DirectMessages | GatewayIntents.MessageContent,
   desiredProperties: {
     user: { id: true, username: true, globalName: true, toggles: true },
-    message: { id: true, content: true, channelId: true, author: true },
-    channel: { id: true, parentId: true },
+    message: {
+      id: true,
+      content: true,
+      channelId: true,
+      guildId: true,
+      author: true,
+      attachments: true,
+    },
+    channel: { id: true, parentId: true, topic: true },
+    attachment: { id: true, url: true, filename: true, contentType: true, size: true },
     member: { roles: true, user: true, nick: true },
     guild: { id: true, name: true, systemChannelId: true, systemChannelFlags: true },
     interaction: {
@@ -261,6 +277,13 @@ const bot = createBot({
     messageCreate: async (message) => {
       // botの案内メッセージなどを、自己紹介として扱わない
       if (message.author?.bot) return;
+
+      // サーバー外(DM)で届いたメッセージは、匿名掲示板への投稿として扱う
+      if (!message.guildId) {
+        await handleDirectMessage(message);
+        return;
+      }
+
       const owner = await findBioChannelOwner(db, message.channelId.toString());
       if (!owner) return;
 
@@ -273,6 +296,43 @@ const bot = createBot({
 });
 
 const log = createLogger(bot);
+
+/**
+ * botに届いたDMを、匿名掲示板に投稿する。投稿者は管理者向けログ(運用通知)に残す。
+ * DMには一切返信しない(受け付けなかった場合も、ログに残すだけ)。
+ */
+async function handleDirectMessage(message: {
+  content?: string;
+  attachments?: IncomingAttachment[];
+  author?: { id: bigint; username: string };
+}): Promise<void> {
+  const authorId = message.author?.id;
+  if (!authorId) return;
+
+  try {
+    const result = await relayToBoard(
+      bot,
+      authorId,
+      message.content ?? "",
+      message.attachments ?? [],
+    );
+    if (!result.ok) {
+      await log(
+        `匿名掲示板への投稿を受け付けませんでした(user=${authorId}, 理由=${result.reason})`,
+      );
+      return;
+    }
+
+    // 掲示板には名前を出さない。管理者だけが確認できるよう、運用通知に投稿者と投稿へのリンクを残す
+    await log(
+      `匿名掲示板に投稿されました(投稿者=<@${authorId}> ${message.author?.username}, 投稿=${
+        boardMessageUrl(result.messageId)
+      })`,
+    );
+  } catch (error) {
+    await log(`匿名掲示板への投稿に失敗しました(user=${authorId}): ${describeError(error)}`);
+  }
+}
 
 /** 入室時の案内が完了したか。「段位を選んでいる」かつ「自己紹介が投稿されている」 */
 async function isOnboardingComplete(userId: string): Promise<boolean> {
@@ -304,6 +364,7 @@ async function provideWelcome(
       bot,
       welcomeChannelId,
       [
+        "## ようこそ",
         `<@${userId}> ${guildName ? `「${guildName}」` : "サーバー"}へようこそ！`,
         "平日(月〜金)は毎日、私がその日に一緒に遊ぶメンバーを選びます！",
         `また、あなた専用の自己紹介チャンネル <#${bioChannelId}> を作ったので、ぜひ自己紹介を投稿してください！`,
@@ -318,7 +379,7 @@ async function provideWelcome(
       bot,
       welcomeChannelId,
       tierSelectMessage(
-        "最後に、あなたの段位を下から選んでください。あとから変えたいときは、/段位 でいつでも変更できます。",
+        "## 段位の設定\nあなたの段位を下から選んでください。あとから変えたいときは、/段位 でいつでも変更できます。",
       ),
     );
     await log(`段位選択メニューをウェルカム用チャンネルに送信しました(user=${userId})`);
@@ -327,9 +388,17 @@ async function provideWelcome(
     await notify(
       bot,
       welcomeChannelId,
-      "段位の選択と自己紹介の投稿が両方済むと、このチャンネルは自動で消えます。",
+      "## このチャンネルについて\n段位の選択と自己紹介の投稿が両方済むと、このチャンネルは自動で消えます。",
     );
     await log(`チャンネルが消えることの案内を送信しました(user=${userId})`);
+
+    step = "匿名掲示板の案内の送信";
+    await notify(
+      bot,
+      welcomeChannelId,
+      `## 匿名掲示板\n<#${boardChannelId}> では、名前を出さずに発言できます。このbotにDMで送ったメッセージが、匿名で掲示板に載ります。画像も送れますよ。`,
+    );
+    await log(`匿名掲示板の案内を送信しました(user=${userId})`);
   } catch (error) {
     await log(
       `入室案内の送信に失敗しました(user=${userId}, 失敗した段階=${step}): ${
@@ -385,6 +454,7 @@ async function closeWelcomeChannelLater(userId: string): Promise<void> {
  * 起動時と毎日3:00(JST)に同じ内容を実行する保守処理。
  * 起動しなかった期間があっても、毎日のバッチで必ず状態が整う。
  * - 管理対象の権限設定の再適用
+ * - 匿名掲示板の説明文(管理者が投稿者を確認できる旨)の再適用
  * - サーバーのシステムメッセージ設定(ウェルカム・ブースト・ヒントの表示、送信先チャンネル)の再適用
  * - pickup用のテキストチャンネル/VCが揃っているかの確認(無ければ作成)と、その権限の再適用
  * - 自己紹介チャンネルの差分修復と、チャンネル名・権限の同期
@@ -394,6 +464,11 @@ async function closeWelcomeChannelLater(userId: string): Promise<void> {
 async function runMaintenance(): Promise<void> {
   await applyManagedPermissions(bot, log);
   await applyGuildSettings(bot, log);
+  try {
+    if (await ensureBoardTopic(bot)) await log("OK: 匿名掲示板の説明文を更新しました");
+  } catch (error) {
+    await log(`NG: 匿名掲示板の説明文の更新に失敗しました: ${describeError(error)}`);
+  }
   try {
     const created = await ensurePickupChannels(bot, db);
     await log(
