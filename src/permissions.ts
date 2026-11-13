@@ -26,6 +26,7 @@ const ROLE_IDS = {
 const CHANNEL_IDS = {
   log: BigInt(Deno.env.get("LOG_CHANNEL_ID")!),
   announce: BigInt(Deno.env.get("ANNOUNCE_CHANNEL_ID")!),
+  rules: BigInt(Deno.env.get("RULES_CHANNEL_ID")!),
   pickupCategory: BigInt(Deno.env.get("PICKUP_CATEGORY_ID")!),
   profileCategory: BigInt(Deno.env.get("PROFILE_CATEGORY_ID")!),
   anonymousBoard: BigInt(Deno.env.get("ANONYMOUS_CHANNEL_ID")!),
@@ -79,6 +80,23 @@ export const MANAGED_PERMISSIONS: ManagedPermission[] = [
     channel: "pickupCategory",
     role: "pickup",
     allow: ["VIEW_CHANNEL", "CONNECT", "SPEAK", "SEND_MESSAGES"],
+  },
+  {
+    description: "ルールチャンネルを、@everyoneは閲覧とリアクションのみに(投稿は管理者・botのみ)",
+    channel: "rules",
+    role: "everyone",
+    allow: [
+      "VIEW_CHANNEL",
+      "READ_MESSAGE_HISTORY",
+      "ADD_REACTIONS",
+      "USE_SLASH_COMMANDS",
+    ],
+    deny: [
+      "SEND_MESSAGES",
+      "CREATE_PUBLIC_THREADS",
+      "CREATE_PRIVATE_THREADS",
+      "SEND_MESSAGES_IN_THREADS",
+    ],
   },
   {
     description: "匿名掲示板を、@everyoneは閲覧とリアクションのみに(投稿はbot経由)",
