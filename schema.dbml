@@ -1,43 +1,14 @@
-// kate6bot のSQLiteスキーマ
+// kate6bot のSQLiteスキーマ(Turso / libSQL)
 // https://dbdiagram.io に貼ると可視化できます
 
 Table members {
   discord_user_id text [pk, note: "Discordのユーザーid"]
-  tier text [note: "段位: 1〜7, 最高峰(内部値8)。未設定ならNULL"]
-  updated_at text [note: "最終更新日時(ISO8601)"]
-  pick_count integer [not null, default: 0, note: "過去に選出された回数。抽選の重み(1/(pick_count+1))に使う"]
+  tier text [note: "段位: 1〜6, 勇士, 最高峰。未設定ならNULL"]
+  updated_at text [not null, note: "最終更新日時(ISO8601)"]
 }
 
-Table weekly_skip {
-  discord_user_id text [not null, note: "参加しないことを表明したユーザーid"]
-  week_of text [not null, note: "対象週の月曜日の日付(YYYY-MM-DD)"]
-
-  indexes {
-    (discord_user_id, week_of) [pk]
-  }
-}
-
-Table pair_history {
-  user_a text [not null, note: "辞書順で小さい方のユーザーid(正規化のため)"]
-  user_b text [not null, note: "辞書順で大きい方のユーザーid"]
-  count integer [not null, default: 0, note: "このペアが同じグループになった回数。重み1/(count+1)に使う"]
-
-  indexes {
-    (user_a, user_b) [pk]
-  }
-}
-
-Table current_pickup {
-  discord_user_id text [pk, note: "現在pickupロールを持っている人。次回ピック時にこの一覧を剥奪してから入れ替える"]
-}
-
-Table pickup_channel {
-  voice_channel_id text [not null, note: "現在のpickup用VCのチャンネルid。毎日削除→再作成するたびに更新される(常に1行)"]
-  text_channel_id text [note: "現在のpickup用テキストチャンネルのid。botの投稿はこちらにのみ行い、VCの内蔵チャットには投稿しない"]
-}
-
-Table bio_channels {
-  discord_user_id text [pk, note: "自己紹介チャンネルの持ち主"]
-  channel_id text [not null, note: "本人専用の自己紹介チャンネルid。profileカテゴリー配下に作成される"]
-  last_message_id text [note: "現在の自己紹介として扱っている最新メッセージid。新規投稿されたら古い方はこのidで削除してから更新する"]
+Table bios {
+  discord_user_id text [pk, note: "自己紹介の持ち主"]
+  content text [not null, note: "自己紹介の本文(1人1件。/自己紹介 のフォームで上書きされる)"]
+  updated_at text [not null, note: "最終更新日時(ISO8601)"]
 }

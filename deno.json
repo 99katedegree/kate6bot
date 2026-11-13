@@ -1,19 +1,18 @@
 {
   "tasks": {
-    "dev": "deno run --watch --unstable-cron --allow-net --allow-env --allow-read --env-file src/main.ts",
-    "start": "deno run --unstable-cron --allow-net --allow-env --allow-read --env-file src/main.ts",
+    "dev": "deno run --watch --allow-net --allow-env --allow-read --env-file src/main.ts",
+    "start": "deno run --allow-net --allow-env --allow-read --env-file src/main.ts",
     "register-commands": "deno run --allow-net --allow-env --env-file scripts/register-commands.ts",
-    "backfill-bio-channels": "deno run --allow-net --allow-env --allow-read --env-file scripts/backfill-bio-channels.ts",
-    "sync-env": "gh secret set -f .env",
-    "check-everyone-permissions": "deno run --allow-net --allow-env --env-file scripts/check-everyone-permissions.ts"
+    "sync-env": "gh secret set -f .env"
   },
   "imports": {
     "@discordeno/bot": "npm:@discordeno/bot@21.0.0",
-    "@libsql/client": "npm:@libsql/client@0.15.15",
-    "@std/path": "jsr:@std/path@1.1.6"
+    "@libsql/client": "npm:@libsql/client@0.15.15"
   },
   "fmt": {
     "lineWidth": 100,
-    "exclude": ["docs/slides.md"]
+    "exclude": [
+      "docs/slides.md"
+    ]
   }
 }

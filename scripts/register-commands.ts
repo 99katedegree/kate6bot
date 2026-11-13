@@ -1,13 +1,26 @@
 import { createBot } from "@discordeno/bot";
+import { COMMAND_BIO, COMMAND_TIER } from "../src/commands.ts";
 
 const bot = createBot({ token: Deno.env.get("DISCORD_TOKEN")! });
-const guildId = BigInt(Deno.env.get("GUILD_ID")!);
 
-await bot.helpers.upsertGuildApplicationCommands(guildId, [
+// 1: ボットとのDM / 2: グループDMなど。サーバー(0)では使わない。
+const CONTEXTS = [1, 2] as const;
+// 0: サーバーへのインストール / 1: ユーザーインストール(サーバーが無くても、自分のアカウントに追加して使える)
+const INTEGRATION_TYPES = [0, 1] as const;
+
+await bot.helpers.upsertGlobalApplicationCommands([
   {
-    name: "段位",
-    description: "あなたにしか見えない形で段位を設定します",
+    name: COMMAND_TIER,
+    description: "あなたの段位を設定します",
+    contexts: [...CONTEXTS],
+    integrationTypes: [...INTEGRATION_TYPES],
+  },
+  {
+    name: COMMAND_BIO,
+    description: "あなたの自己紹介を書いたり、書き直したりします",
+    contexts: [...CONTEXTS],
+    integrationTypes: [...INTEGRATION_TYPES],
   },
 ]);
 
-console.log("Registered /段位 command.");
+console.log(`Registered global commands: /${COMMAND_TIER}, /${COMMAND_BIO}`);

@@ -208,7 +208,6 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@std/path@1.1.6",
       "npm:@discordeno/bot@21.0.0",
       "npm:@libsql/client@0.15.15"
     ]

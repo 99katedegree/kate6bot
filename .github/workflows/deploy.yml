@@ -18,29 +18,11 @@ jobs:
       - name: Sync secrets to Fly
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          GUILD_ID: ${{ secrets.GUILD_ID }}
-          OWNER_USER_ID: ${{ secrets.OWNER_USER_ID }}
-          LOG_CHANNEL_ID: ${{ secrets.LOG_CHANNEL_ID }}
-          ANNOUNCE_CHANNEL_ID: ${{ secrets.ANNOUNCE_CHANNEL_ID }}
-          ANONYMOUS_CHANNEL_ID: ${{ secrets.ANONYMOUS_CHANNEL_ID }}
-          RULES_CHANNEL_ID: ${{ secrets.RULES_CHANNEL_ID }}
-          PICKUP_CATEGORY_ID: ${{ secrets.PICKUP_CATEGORY_ID }}
-          PROFILE_CATEGORY_ID: ${{ secrets.PROFILE_CATEGORY_ID }}
-          PICKUP_ROLE_ID: ${{ secrets.PICKUP_ROLE_ID }}
           TURSO_URL: ${{ secrets.TURSO_URL }}
           TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
         run: |
           printf '%s\n' \
             "DISCORD_TOKEN=$DISCORD_TOKEN" \
-            "GUILD_ID=$GUILD_ID" \
-            "OWNER_USER_ID=$OWNER_USER_ID" \
-            "LOG_CHANNEL_ID=$LOG_CHANNEL_ID" \
-            "ANNOUNCE_CHANNEL_ID=$ANNOUNCE_CHANNEL_ID" \
-            "ANONYMOUS_CHANNEL_ID=$ANONYMOUS_CHANNEL_ID" \
-            "RULES_CHANNEL_ID=$RULES_CHANNEL_ID" \
-            "PICKUP_CATEGORY_ID=$PICKUP_CATEGORY_ID" \
-            "PROFILE_CATEGORY_ID=$PROFILE_CATEGORY_ID" \
-            "PICKUP_ROLE_ID=$PICKUP_ROLE_ID" \
             "TURSO_URL=$TURSO_URL" \
             "TURSO_TOKEN=$TURSO_TOKEN" \
             | flyctl secrets import --stage
