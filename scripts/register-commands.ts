@@ -3,8 +3,8 @@ import { COMMAND_BIO, COMMAND_TIER } from "../src/commands.ts";
 
 const bot = createBot({ token: Deno.env.get("DISCORD_TOKEN")! });
 
-// 1: ボットとのDM / 2: グループDMなど。サーバー(0)では使わない。
-const CONTEXTS = [1, 2] as const;
+// 0: サーバーのチャンネル / 1: ボットとのDM / 2: 他のユーザーとのDM・グループDM
+const CONTEXTS = [0, 1, 2] as const;
 // 0: サーバーへのインストール / 1: ユーザーインストール(サーバーが無くても、自分のアカウントに追加して使える)
 const INTEGRATION_TYPES = [0, 1] as const;
 
