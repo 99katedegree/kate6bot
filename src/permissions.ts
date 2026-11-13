@@ -1,4 +1,5 @@
 import { OverwriteTypes, type PermissionStrings } from "@discordeno/bot";
+import { describeError } from "./errors.ts";
 
 interface ChannelPermissionEditor {
   helpers: {
@@ -97,7 +98,7 @@ export async function applyManagedPermissions(
       );
       await log(`OK: ${entry.description}`);
     } catch (error) {
-      await log(`NG: ${entry.description}: ${error}`);
+      await log(`NG: ${entry.description}: ${describeError(error)}`);
     }
   }
 }
@@ -126,7 +127,9 @@ export async function applyPickupChildPermissions(
           `pickupチャンネルの権限を再適用: ${entry.description}`,
         );
       } catch (error) {
-        await log(`NG: pickupチャンネル(${channelId})の権限: ${entry.description}: ${error}`);
+        await log(
+          `NG: pickupチャンネル(${channelId})の権限: ${entry.description}: ${describeError(error)}`,
+        );
       }
     }
   }
