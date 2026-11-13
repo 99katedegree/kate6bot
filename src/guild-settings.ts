@@ -2,6 +2,10 @@ import { SystemChannelFlags } from "@discordeno/bot";
 import { describeError } from "./errors.ts";
 
 interface GuildSettingsEditor {
+  rest: {
+    get: (url: string) => Promise<unknown>;
+    patch: (url: string, options: { body: unknown }, ...rest: unknown[]) => Promise<unknown>;
+  };
   helpers: {
     getGuild: (
       guildId: bigint,
@@ -65,5 +69,49 @@ export async function applyGuildSettings(
     );
   } catch (error) {
     await log(`NG: サーバーのシステムメッセージ設定の適用に失敗しました: ${describeError(error)}`);
+  }
+}
+
+const CREATE_INSTANT_INVITE = 1n << 0n;
+
+/**
+ * 招待を「誰でもできる」状態にそろえる(起動時と毎日の保守処理で実行)。
+ * - @everyone ロールに「招待を作成」の権限を付ける(他の権限は変更しない)
+ * - サーバーの「招待の一時停止」(INVITES_DISABLED)が有効なら、解除する
+ * 既にそろっている場合は何も書き込まない。
+ */
+export async function applyInviteSettings(
+  bot: GuildSettingsEditor,
+  log: (message: string) => Promise<void>,
+): Promise<void> {
+  try {
+    const roles = await bot.rest.get(`/guilds/${guildId}/roles`) as {
+      id: string;
+      permissions: string;
+    }[];
+    // @everyone ロールのidはギルドidと常に同一
+    const everyone = roles.find((role) => role.id === guildId.toString());
+    if (!everyone) throw new Error("@everyoneロールが見つかりませんでした");
+
+    const currentPermissions = BigInt(everyone.permissions);
+    if ((currentPermissions & CREATE_INSTANT_INVITE) === 0n) {
+      await bot.rest.patch(`/guilds/${guildId}/roles/${guildId}`, {
+        body: { permissions: (currentPermissions | CREATE_INSTANT_INVITE).toString() },
+      });
+      await log("OK: @everyoneに「招待を作成」の権限を付けました");
+    } else {
+      await log("OK: @everyoneは、すでに招待を作成できます");
+    }
+
+    const guild = await bot.rest.get(`/guilds/${guildId}`) as { features?: string[] };
+    const features = guild.features ?? [];
+    if (features.includes("INVITES_DISABLED")) {
+      await bot.rest.patch(`/guilds/${guildId}`, {
+        body: { features: features.filter((feature) => feature !== "INVITES_DISABLED") },
+      });
+      await log("OK: サーバーの「招待の一時停止」を解除しました");
+    }
+  } catch (error) {
+    await log(`NG: 招待の設定の適用に失敗しました: ${describeError(error)}`);
   }
 }

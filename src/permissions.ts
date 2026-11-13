@@ -99,10 +99,10 @@ export const MANAGED_PERMISSIONS: ManagedPermission[] = [
     ],
   },
   {
-    description: "匿名掲示板を、@everyoneは閲覧とリアクションのみに(投稿はbot経由)",
+    description: "匿名掲示板を、@everyoneは閲覧・リアクション・投稿の削除のみに(投稿はbot経由)",
     channel: "anonymousBoard",
     role: "everyone",
-    allow: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY", "ADD_REACTIONS"],
+    allow: ["VIEW_CHANNEL", "READ_MESSAGE_HISTORY", "ADD_REACTIONS", "MANAGE_MESSAGES"],
     deny: [
       "SEND_MESSAGES",
       "CREATE_PUBLIC_THREADS",

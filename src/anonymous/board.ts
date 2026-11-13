@@ -1,4 +1,5 @@
 import type { CreateMessageOptions, FileContent } from "@discordeno/bot";
+import type { Database } from "../db.ts";
 
 /** 匿名掲示板の投稿の末尾に付ける区切り線(kate5botと同じ形式) */
 export const SEPARATOR = "----------------------------------------------";
@@ -52,6 +53,12 @@ interface BoardBot {
       options: CreateMessageOptions,
     ) => Promise<{ id: bigint }>;
     getMember: (guildId: bigint, userId: bigint) => Promise<unknown>;
+    editMessage: (
+      channelId: bigint,
+      messageId: bigint,
+      options: { content: string; allowedMentions?: CreateMessageOptions["allowedMentions"] },
+    ) => Promise<unknown>;
+    deleteMessage: (channelId: bigint, messageId: bigint, reason?: string) => Promise<void>;
     getChannel: (channelId: bigint) => Promise<{ topic?: string | null }>;
     editChannel: (
       channelId: bigint,
@@ -116,4 +123,111 @@ export async function ensureBoardTopic(bot: BoardBot): Promise<boolean> {
 /** 管理者向けログに載せる、投稿へのリンク */
 export function boardMessageUrl(messageId: bigint): string {
   return `https://discord.com/channels/${guildId}/${boardChannelId}/${messageId}`;
+}
+
+/** 対応表: DMのメッセージ → 掲示板の投稿 */
+export async function savePost(
+  db: Database,
+  dmMessageId: bigint,
+  boardMessageId: bigint,
+  authorId: bigint,
+  content: string,
+): Promise<void> {
+  await db.execute({
+    sql:
+      "INSERT OR REPLACE INTO anonymous_posts (dm_message_id, board_message_id, author_id, content) VALUES (?, ?, ?, ?)",
+    args: [dmMessageId.toString(), boardMessageId.toString(), authorId.toString(), content],
+  });
+}
+
+interface PostRecord {
+  boardMessageId: bigint;
+  authorId: string;
+  content: string;
+}
+
+export async function findPostByDmMessage(
+  db: Database,
+  dmMessageId: bigint,
+): Promise<PostRecord | null> {
+  const result = await db.execute({
+    sql: "SELECT board_message_id, author_id, content FROM anonymous_posts WHERE dm_message_id = ?",
+    args: [dmMessageId.toString()],
+  });
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    boardMessageId: BigInt(String(row.board_message_id)),
+    authorId: String(row.author_id),
+    content: String(row.content),
+  };
+}
+
+export async function deletePostRecordByDm(db: Database, dmMessageId: bigint): Promise<void> {
+  await db.execute({
+    sql: "DELETE FROM anonymous_posts WHERE dm_message_id = ?",
+    args: [dmMessageId.toString()],
+  });
+}
+
+/** 掲示板上で直接削除された投稿の対応を消す */
+export async function deletePostRecordByBoard(
+  db: Database,
+  boardMessageId: bigint,
+): Promise<void> {
+  await db.execute({
+    sql: "DELETE FROM anonymous_posts WHERE board_message_id = ?",
+    args: [boardMessageId.toString()],
+  });
+}
+
+export type EditResult = "edited" | "unchanged" | "too-long" | "no-post";
+
+/**
+ * DMのメッセージが編集されたとき、掲示板の投稿の本文を書き換える。文字だけが対象(画像は変わらない)。
+ * 本文が最後に反映したものと同じなら(リンクのプレビューなど)、何もしない。
+ */
+export async function editBoardPost(
+  bot: BoardBot,
+  db: Database,
+  dmMessageId: bigint,
+  rawContent: string,
+): Promise<EditResult> {
+  const post = await findPostByDmMessage(db, dmMessageId);
+  if (!post) return "no-post";
+
+  const content = rawContent.trim();
+  if (content === post.content) return "unchanged";
+  if (content.length > MAX_CONTENT_LENGTH) return "too-long";
+
+  await bot.helpers.editMessage(boardChannelId, post.boardMessageId, {
+    content: buildBoardPost(content),
+    allowedMentions: { parse: [] },
+  });
+  await db.execute({
+    sql: "UPDATE anonymous_posts SET content = ? WHERE dm_message_id = ?",
+    args: [content, dmMessageId.toString()],
+  });
+  return "edited";
+}
+
+/** DMのメッセージが削除されたとき、掲示板の投稿も削除する。対応する投稿が無ければ false。 */
+export async function deleteBoardPost(
+  bot: BoardBot,
+  db: Database,
+  dmMessageId: bigint,
+): Promise<boolean> {
+  const post = await findPostByDmMessage(db, dmMessageId);
+  if (!post) return false;
+  try {
+    await bot.helpers.deleteMessage(
+      boardChannelId,
+      post.boardMessageId,
+      "DMのメッセージが削除されたため",
+    );
+  } catch {
+    // 掲示板で既に削除されている場合などは無視して、対応表だけ消す
+  }
+  await deletePostRecordByDm(db, dmMessageId);
+  return true;
 }

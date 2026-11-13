@@ -20,11 +20,15 @@ import {
 import {
   boardChannelId,
   boardMessageUrl,
+  deleteBoardPost,
+  deletePostRecordByBoard,
+  editBoardPost,
   ensureBoardTopic,
   type IncomingAttachment,
   relayToBoard,
+  savePost,
 } from "./anonymous/board.ts";
-import { applyGuildSettings } from "./guild-settings.ts";
+import { applyGuildSettings, applyInviteSettings } from "./guild-settings.ts";
 import { applyManagedPermissions, applyPickupChildPermissions } from "./permissions.ts";
 import {
   forceDisconnectFromVoice,
@@ -274,6 +278,39 @@ const bot = createBot({
         );
       }
     },
+    // DMのメッセージが編集されたら、掲示板の投稿も書き換える(文字のみ)
+    messageUpdate: async (message) => {
+      if (message.guildId || message.content === undefined) return;
+      try {
+        const result = await editBoardPost(bot, db, message.id, message.content);
+        if (result === "edited") {
+          await log(
+            `匿名掲示板の投稿を、DMの編集に合わせて書き換えました(user=${message.author?.id})`,
+          );
+        } else if (result === "too-long") {
+          await log(
+            `DMの編集後の本文が長すぎるため、匿名掲示板の投稿は書き換えませんでした(user=${message.author?.id})`,
+          );
+        }
+      } catch (error) {
+        await log(`匿名掲示板の投稿の書き換えに失敗しました: ${describeError(error)}`);
+      }
+    },
+    messageDelete: async (payload) => {
+      try {
+        if (payload.guildId) {
+          // 掲示板で直接削除された投稿は、対応表からも消す
+          if (payload.channelId === boardChannelId) await deletePostRecordByBoard(db, payload.id);
+          return;
+        }
+        // DMのメッセージが削除されたら、掲示板の投稿も削除する
+        if (await deleteBoardPost(bot, db, payload.id)) {
+          await log("匿名掲示板の投稿を、DMの削除に合わせて削除しました");
+        }
+      } catch (error) {
+        await log(`匿名掲示板の投稿の削除に失敗しました: ${describeError(error)}`);
+      }
+    },
     messageCreate: async (message) => {
       // botの案内メッセージなどを、自己紹介として扱わない
       if (message.author?.bot) return;
@@ -302,6 +339,7 @@ const log = createLogger(bot);
  * DMには一切返信しない(受け付けなかった場合も、ログに残すだけ)。
  */
 async function handleDirectMessage(message: {
+  id: bigint;
   content?: string;
   attachments?: IncomingAttachment[];
   author?: { id: bigint; username: string };
@@ -322,6 +360,9 @@ async function handleDirectMessage(message: {
       );
       return;
     }
+
+    // DMの編集・削除を掲示板の投稿へ反映できるよう、対応を記録する
+    await savePost(db, message.id, result.messageId, authorId, (message.content ?? "").trim());
 
     // 掲示板には名前を出さない。管理者だけが確認できるよう、運用通知に投稿者と投稿へのリンクを残す
     await log(
@@ -396,7 +437,7 @@ async function provideWelcome(
     await notify(
       bot,
       welcomeChannelId,
-      `## 匿名掲示板\n<#${boardChannelId}> では、名前を出さずに発言できます。このbotにDMで送ったメッセージが、匿名で掲示板に載ります。画像も送れますよ。`,
+      `## 匿名掲示板\n<#${boardChannelId}> では、名前を出さずに発言できます。このbotにDMで送ったメッセージが、匿名で掲示板に載ります。画像も送れますよ。\nDMで送ったメッセージを編集すると、掲示板の投稿も書き換わります(文字のみ)。投稿を消したいときは、DMのメッセージを削除するか、掲示板で直接削除してください。`,
     );
     await log(`匿名掲示板の案内を送信しました(user=${userId})`);
   } catch (error) {
@@ -455,6 +496,7 @@ async function closeWelcomeChannelLater(userId: string): Promise<void> {
  * 起動しなかった期間があっても、毎日のバッチで必ず状態が整う。
  * - 管理対象の権限設定の再適用
  * - 匿名掲示板の説明文(管理者が投稿者を確認できる旨)の再適用
+ * - 招待を誰でもできる状態にそろえる(@everyoneの権限と、招待の一時停止の解除)
  * - サーバーのシステムメッセージ設定(ウェルカム・ブースト・ヒントの表示、送信先チャンネル)の再適用
  * - pickup用のテキストチャンネル/VCが揃っているかの確認(無ければ作成)と、その権限の再適用
  * - 自己紹介チャンネルの差分修復と、チャンネル名・権限の同期
@@ -464,6 +506,7 @@ async function closeWelcomeChannelLater(userId: string): Promise<void> {
 async function runMaintenance(): Promise<void> {
   await applyManagedPermissions(bot, log);
   await applyGuildSettings(bot, log);
+  await applyInviteSettings(bot, log);
   try {
     if (await ensureBoardTopic(bot)) await log("OK: 匿名掲示板の説明文を更新しました");
   } catch (error) {
