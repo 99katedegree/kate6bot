@@ -27,5 +27,13 @@ jobs:
             "TURSO_TOKEN=$TURSO_TOKEN" \
             | flyctl secrets import --stage
       - run: flyctl deploy --remote-only --ha=false
+      # スラッシュコマンド(/段位, /自己紹介)をDiscordへ登録する(毎回上書きするだけなので、何度実行しても同じ結果になる)
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Register slash commands
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        run: deno run --allow-net --allow-env scripts/register-commands.ts
       # 週次cronが二重実行されないよう、常に1台に矯正する(待機マシンなどが増えていたら削除される)
       - run: flyctl scale count 1 --yes --app fly-kate6bot
