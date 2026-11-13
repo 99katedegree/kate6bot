@@ -7,7 +7,7 @@ import {
   getAllBioChannels,
 } from "./bio.ts";
 
-interface GuildMember {
+export interface GuildMember {
   nick?: string | null;
   user?: { id: bigint; username: string; globalName?: string | null; bot?: boolean };
 }
@@ -52,7 +52,7 @@ function isNotFound(error: unknown): boolean {
     message.includes("10003");
 }
 
-async function fetchAllMembers(bot: ReconcileBot): Promise<GuildMember[]> {
+export async function fetchAllMembers(bot: ReconcileBot): Promise<GuildMember[]> {
   const all: GuildMember[] = [];
   let after: string | undefined;
   while (true) {

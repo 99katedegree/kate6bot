@@ -43,7 +43,7 @@ import {
   replaceBioMessage,
   syncBioChannelNames,
 } from "./profile/bio.ts";
-import { reconcileBioChannels } from "./profile/reconcile.ts";
+import { fetchAllMembers, reconcileBioChannels } from "./profile/reconcile.ts";
 import { jstDateString, upcomingMonday, weekStartMonday } from "./schedule.ts";
 import { clearTier, getTier, setTier } from "./tier/members.ts";
 import {
@@ -227,57 +227,7 @@ const bot = createBot({
       );
       await log(`自己紹介チャンネルを用意しました(user=${userId}, channel=${channelId})`);
 
-      // 案内は、本人にしか見えないウェルカム用チャンネルに送る(DMを受け付けない設定の人にも届く)
-      let step = "ウェルカム用チャンネルの作成";
-      try {
-        const { id: welcomeChannelId, created } = await ensureWelcomeChannel(
-          bot,
-          db,
-          userId,
-          displayName({ nick: member.nick, user }),
-        );
-        if (!created) {
-          // 既にあるチャンネルには案内を送り済みなので、重複して送らない
-          await log(
-            `ウェルカム用チャンネルは既にあるため、案内は送りません(user=${userId}, channel=${welcomeChannelId})`,
-          );
-          return;
-        }
-        await log(
-          `ウェルカム用チャンネルを作成しました(user=${userId}, channel=${welcomeChannelId})`,
-        );
-
-        step = "案内メッセージの送信";
-        const guildName = await bot.helpers.getGuild(guildId).then((g) => g.name).catch(() => null);
-        await notify(
-          bot,
-          welcomeChannelId,
-          [
-            `<@${userId}> ${guildName ? `「${guildName}」` : "サーバー"}へようこそ！`,
-            "平日(月〜金)は毎日、私がその日に一緒に遊ぶメンバーを選びます！",
-            `また、あなた専用の自己紹介チャンネル <#${channelId}> を作ったので、ぜひ自己紹介を投稿してください！`,
-            "投稿した自己紹介は、一緒に遊ぶときに自動で共有されます。何度でも投稿し直せて、使われるのは最新の1件だけです。",
-          ].join("\n"),
-        );
-        await log(`案内をウェルカム用チャンネルに送信しました(user=${userId})`);
-
-        // 段位は選択肢から選ぶだけ。選択後は /段位 と同じ処理でロールが付与される
-        step = "段位選択メニューの送信";
-        await notify(
-          bot,
-          welcomeChannelId,
-          tierSelectMessage(
-            "最後に、あなたの段位を下から選んでください。あとから変えたいときは、/段位 でいつでも変更できます。",
-          ),
-        );
-        await log(`段位選択メニューをウェルカム用チャンネルに送信しました(user=${userId})`);
-      } catch (error) {
-        await log(
-          `入室案内の送信に失敗しました(user=${userId}, 失敗した段階=${step}): ${
-            explainDiscordError(error)
-          }\n詳細: ${describeError(error)}`,
-        );
-      }
+      await provideWelcome(userId, displayName({ nick: member.nick, user }), channelId);
     },
     guildMemberUpdate: async (member, user) => {
       const userId = user.id.toString();
@@ -330,6 +280,90 @@ async function isOnboardingComplete(userId: string): Promise<boolean> {
   return (await getBioChannel(db, userId))?.lastMessageId != null;
 }
 
+/**
+ * 本人にしか見えないウェルカム用チャンネルを用意して、案内と段位メニューを送る(DMを受け付けない設定の人にも届く)。
+ * 既にあるチャンネルには案内を送り済みなので、何もしない。
+ * 作ったのに案内の送信に失敗した場合は、次回やり直せるようにチャンネルごと削除する。
+ */
+async function provideWelcome(
+  userId: string,
+  name: string,
+  bioChannelId: bigint,
+): Promise<void> {
+  let step = "ウェルカム用チャンネルの作成";
+  let createdChannel = false;
+  try {
+    const { id: welcomeChannelId, created } = await ensureWelcomeChannel(bot, db, userId, name);
+    if (!created) return;
+    createdChannel = true;
+    await log(`ウェルカム用チャンネルを作成しました(user=${userId}, channel=${welcomeChannelId})`);
+
+    step = "案内メッセージの送信";
+    const guildName = await bot.helpers.getGuild(guildId).then((g) => g.name).catch(() => null);
+    await notify(
+      bot,
+      welcomeChannelId,
+      [
+        `<@${userId}> ${guildName ? `「${guildName}」` : "サーバー"}へようこそ！`,
+        "平日(月〜金)は毎日、私がその日に一緒に遊ぶメンバーを選びます！",
+        `また、あなた専用の自己紹介チャンネル <#${bioChannelId}> を作ったので、ぜひ自己紹介を投稿してください！`,
+        "投稿した自己紹介は、一緒に遊ぶときに自動で共有されます。何度でも投稿し直せて、使われるのは最新の1件だけです。",
+      ].join("\n"),
+    );
+    await log(`案内をウェルカム用チャンネルに送信しました(user=${userId})`);
+
+    // 段位は選択肢から選ぶだけ。選択後は /段位 と同じ処理でロールが付与される
+    step = "段位選択メニューの送信";
+    await notify(
+      bot,
+      welcomeChannelId,
+      tierSelectMessage(
+        "最後に、あなたの段位を下から選んでください。あとから変えたいときは、/段位 でいつでも変更できます。",
+      ),
+    );
+    await log(`段位選択メニューをウェルカム用チャンネルに送信しました(user=${userId})`);
+
+    step = "チャンネルが消えることの案内の送信";
+    await notify(
+      bot,
+      welcomeChannelId,
+      "段位の選択と自己紹介の投稿が両方済むと、このチャンネルは自動で消えます。",
+    );
+    await log(`チャンネルが消えることの案内を送信しました(user=${userId})`);
+  } catch (error) {
+    await log(
+      `入室案内の送信に失敗しました(user=${userId}, 失敗した段階=${step}): ${
+        explainDiscordError(error)
+      }\n詳細: ${describeError(error)}`,
+    );
+    if (createdChannel) {
+      // 空のまま残さない。次回の保守処理で作り直して、案内を送り直す
+      await deleteWelcomeChannel(bot, db, userId, "案内の送信に失敗したため").catch(() => {});
+    }
+  }
+}
+
+/**
+ * 保守処理用。すでにいるメンバーも含めて、案内が完了していない人(段位が未設定、または自己紹介が未投稿)に、
+ * ウェルカム用チャンネルが無ければ作って案内を送る。
+ */
+async function ensureWelcomeForIncompleteMembers(): Promise<void> {
+  const members = (await fetchAllMembers(bot)).filter((m) => m.user && !m.user.bot);
+  let provided = 0;
+  for (const member of members) {
+    const userId = member.user!.id.toString();
+    if (await isOnboardingComplete(userId)) continue;
+    if (await getWelcomeChannel(db, userId)) continue;
+    const bioChannel = await getBioChannel(db, userId);
+    if (!bioChannel) continue; // 自己紹介チャンネルの修復(runBioReconcile)が先に作る
+    await provideWelcome(userId, displayName(member), BigInt(bioChannel.channelId));
+    provided++;
+  }
+  await log(
+    `案内が未完了の人のウェルカム用チャンネルを確認しました(対象: ${provided}人に新規送信)`,
+  );
+}
+
 /** 案内が完了した人のウェルカム用チャンネルを、返信を読む時間を置いてから削除する */
 async function closeWelcomeChannelLater(userId: string): Promise<void> {
   if (!await getWelcomeChannel(db, userId)) return;
@@ -353,8 +387,9 @@ async function closeWelcomeChannelLater(userId: string): Promise<void> {
  * - 管理対象の権限設定の再適用
  * - サーバーのシステムメッセージ設定(ウェルカム・ブースト・ヒントの表示、送信先チャンネル)の再適用
  * - pickup用のテキストチャンネル/VCが揃っているかの確認(無ければ作成)と、その権限の再適用
- * - ウェルカム用チャンネルの片付け(段位設定済み・サーバーを抜けた人の分)
  * - 自己紹介チャンネルの差分修復と、チャンネル名・権限の同期
+ * - ウェルカム用チャンネルの片付け(案内が完了した人・サーバーを抜けた人の分)
+ * - 案内が未完了の人(すでにいるメンバー含む)へのウェルカム用チャンネルの用意
  */
 async function runMaintenance(): Promise<void> {
   await applyManagedPermissions(bot, log);
@@ -370,13 +405,13 @@ async function runMaintenance(): Promise<void> {
     await log(`pickup用チャンネルの確認に失敗しました: ${describeError(error)}`);
   }
   await applyPickupChildPermissions(bot, await getPickupChannelIds(db), log);
-  await cleanupWelcomeChannels(
-    bot,
-    db,
-    isOnboardingComplete,
-    log,
-  );
   await runBioReconcile();
+  await cleanupWelcomeChannels(bot, db, isOnboardingComplete, log);
+  try {
+    await ensureWelcomeForIncompleteMembers();
+  } catch (error) {
+    await log(`ウェルカム用チャンネルの確認に失敗しました: ${describeError(error)}`);
+  }
 }
 
 /** メンバーと自己紹介チャンネルの差分修復と、チャンネル名の表示名への同期を行う*/
