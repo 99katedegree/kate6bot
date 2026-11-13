@@ -52,10 +52,21 @@ export const MANAGED_PERMISSIONS: ManagedPermission[] = [
     deny: ["VIEW_CHANNEL"],
   },
   {
-    description: "アナウンスチャンネルの閲覧・コマンド利用を保証",
+    description: "アナウンスチャンネルを、@everyoneは閲覧とリアクションのみに(投稿はbotのみ)",
     channel: "announce",
     role: "everyone",
-    allow: ["VIEW_CHANNEL", "USE_SLASH_COMMANDS"],
+    allow: [
+      "VIEW_CHANNEL",
+      "READ_MESSAGE_HISTORY",
+      "ADD_REACTIONS",
+      "USE_SLASH_COMMANDS",
+    ],
+    deny: [
+      "SEND_MESSAGES",
+      "CREATE_PUBLIC_THREADS",
+      "CREATE_PRIVATE_THREADS",
+      "SEND_MESSAGES_IN_THREADS",
+    ],
   },
   {
     description: "pickupカテゴリーを@everyoneから不可視に",
